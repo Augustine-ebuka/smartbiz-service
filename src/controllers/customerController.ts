@@ -5,7 +5,12 @@ class CustomerController {
 
   async create(req: Request, res: Response, next: NextFunction) {
     try {
-      const userId = (req as any).businessOwnerId as string;
+      console.log(req.body);
+      
+      const userId = (req as any).businessOwnerId as string || '';
+      if (!userId) {
+        throw new Error('Business owner ID is required.');
+      }
       const customer = await CustomerService.create(userId, req.body);
       res.status(201).json({
         success: true,

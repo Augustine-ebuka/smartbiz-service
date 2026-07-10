@@ -4,7 +4,7 @@ import { authenticateToken } from '../middlewares/authMiddleware';
 import CustomerController from '../controllers/customerController';
 import ProductController from '../controllers/productController';
 import ExpenseCategoryController from '../controllers/expenseCategoryController';
-
+import {resolveBusinessOwner} from '../middlewares/businessOwnerMiddleware';
 const router = Router();
 
 // All catalog routes require authentication
@@ -17,6 +17,7 @@ router.use(authenticateToken);
 // PATCH  /api/catalog/customers/:id     → update customer
 // DELETE /api/catalog/customers/:id     → delete customer
 
+router.use(resolveBusinessOwner);
 router.post  ('/customers',     CustomerController.create);
 router.get   ('/customers',     CustomerController.getAll);
 router.get   ('/customers/:id', CustomerController.getById);
