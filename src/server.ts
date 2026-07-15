@@ -15,6 +15,7 @@ import ApiError from './utils/ApiError';
 
 const app = express();
 const PORT = process.env.PORT || APP_PORT;
+// added useless comment
 
 async function dropLegacyUserOtpTtlIndexes() {
   const usersCollection = mongoose.connection.collection('users');
