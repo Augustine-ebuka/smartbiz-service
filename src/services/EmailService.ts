@@ -280,7 +280,7 @@ class EmailService {
   }
 
   async sendOtp({ to, firstName, otp }: SendOtpOptions): Promise<void> {
-    await this.transporter.sendMail({
+    return await this.transporter.sendMail({
       from: `"SmartBiz" <${process.env.EMAIL_USER}>`,
       to,
       subject: `${otp} is your verification code`,
