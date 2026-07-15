@@ -279,14 +279,20 @@ class EmailService {
     this.transporter = createTransport();
   }
 
-  async sendOtp({ to, firstName, otp }: SendOtpOptions): Promise<void> {
-    return await this.transporter.sendMail({
-      from: `"SmartBiz" <${process.env.EMAIL_USER}>`,
-      to,
-      subject: `${otp} is your verification code`,
-      html: otpEmailTemplate(firstName, otp),
-    });
-  }
+async sendOtp({ to, firstName, otp }: SendOtpOptions) {
+  console.log("Starting email send");
+
+  const response = await this.transporter.sendMail({
+    from: `"SmartBiz" <${process.env.EMAIL_USER}>`,
+    to,
+    subject: `${otp} is your verification code`,
+    html: otpEmailTemplate(firstName, otp),
+  });
+
+  console.log("Email sent successfully", response);
+
+  return response;
+}
 
   async sendPasswordResetOtp({ to, firstName, otp }: SendPasswordResetOtpOptions): Promise<void> {
     await this.transporter.sendMail({
