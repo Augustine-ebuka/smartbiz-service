@@ -1,4 +1,4 @@
-import nodemailer, { Transporter } from 'nodemailer';
+import { Resend } from 'resend';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,19 +27,13 @@ interface SendSaleskeeperInviteOptions {
   tempPassword: string;
 }
 
-// ─── Transport ────────────────────────────────────────────────────────────────
+// ─── Resend client ────────────────────────────────────────────────────────────
 
-function createTransport(): Transporter {
-  return nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 587,
-    secure: false,
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  });
-}
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+// Sender address — must match your verified domain in Resend dashboard
+// e.g. "Your Business App <no-reply@yourdomain.com>"
+const FROM_ADDRESS = process.env.EMAIL_FROM ?? 'SmartBiz <onboarding@resend.dev>';
 
 // ─── Templates ────────────────────────────────────────────────────────────────
 
@@ -275,64 +269,43 @@ function saleskeeperInviteTemplate(name: string, businessName: string, email: st
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 class EmailService {
-  private transporter: Transporter;
 
-  constructor() {
-    this.transporter = createTransport();
+  async sendOtp({ to, firstName, otp }: SendOtpOptions): Promise<void> {
+    await resend.emails.send({
+      from:    FROM_ADDRESS,
+      to,
+      subject: `${otp} is your verification code`,
+      html:    otpEmailTemplate(firstName, otp),
+    });
   }
 
-async sendOtp({ to, firstName, otp }: SendOtpOptions) {
-  console.log("Starting email send");
-  console.log("EMAIL_USER:", process.env.EMAIL_USER);
-  console.log("EMAIL_PASS exists:", !!process.env.EMAIL_PASS);
-
-  const response = await this.transporter.sendMail({
-    from: `"SmartBiz" <${process.env.EMAIL_USER}>`,
-    to,
-    subject: `${otp} is your verification code`,
-    html: otpEmailTemplate(firstName, otp),
-  });
-
-  console.log("Email sent successfully", response);
-
-  return response;
-}
-
   async sendPasswordResetOtp({ to, firstName, otp }: SendPasswordResetOtpOptions): Promise<void> {
-    await this.transporter.sendMail({
-      from: `"SmartBiz" <${process.env.EMAIL_USER}>`,
+    await resend.emails.send({
+      from:    FROM_ADDRESS,
       to,
       subject: `${otp} — your password reset code`,
-      html: passwordResetEmailTemplate(firstName, otp),
+      html:    passwordResetEmailTemplate(firstName, otp),
     });
   }
 
   async sendWelcomeEmail({ to, firstName, businessName }: SendWelcomeEmailOptions): Promise<void> {
-    await this.transporter.sendMail({
-      from: `"SmartBiz" <${process.env.EMAIL_USER}>`,
+    await resend.emails.send({
+      from:    FROM_ADDRESS,
       to,
-      subject: `Welcome to SmartBiz, ${firstName}! 🎉`,
-      html: welcomeEmailTemplate(firstName, businessName),
+      subject: `Welcome to Your Business App, ${firstName}! 🎉`,
+      html:    welcomeEmailTemplate(firstName, businessName),
     });
   }
 
   async sendSaleskeeperInvite({ to, name, businessName, tempPassword }: SendSaleskeeperInviteOptions): Promise<void> {
-    await this.transporter.sendMail({
-      from: `"SmartBiz" <${process.env.EMAIL_USER}>`, 
+    await resend.emails.send({
+      from:    FROM_ADDRESS,
       to,
       subject: `You have been invited to manage ${businessName}`,
-      html: saleskeeperInviteTemplate(name, businessName, to, tempPassword),
+      html:    saleskeeperInviteTemplate(name, businessName, to, tempPassword),
     });
   }
 
-  async verifyConnection(): Promise<boolean> {
-    try {
-      await this.transporter.verify();
-      return true;
-    } catch {
-      return false;
-    }
-  }
 }
 
 export default new EmailService();

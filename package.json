@@ -16,15 +16,15 @@
     "multer-storage-cloudinary": "^4.0.0",
     "nodemailer": "^9.0.1",
     "nodemon": "^3.1.7",
+    "resend": "^6.17.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.6.2"
   },
-
-    "scripts": {
-      "build": "tsc",
-      "start": "node dist/server.js",
-      "dev": "ts-node src/server.ts"
-    },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "ts-node src/server.ts"
+  },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
     "@types/cors": "^2.8.19",
