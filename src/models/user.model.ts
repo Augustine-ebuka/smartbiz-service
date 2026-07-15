@@ -82,6 +82,7 @@ export interface IUser extends Document {
   otpExpiresAt?: Date;       // expiry timestamp
   settings?: ISettings;
   ownerId?: string;          // set for saleskeepers — points to the business owner's userId
+  avatarUrl?: string;        // user profile avatar
   comparePassword(candidatePassword: string): Promise<boolean>;
   compareOtp(candidateOtp: string): Promise<boolean>;
 }
@@ -175,6 +176,7 @@ const UserSchema = new Schema<IUser>(
     isActive:         { type: Boolean, default: true },
     isEmailVerified:  { type: Boolean, default: false },
     ownerId:          { type: String, index: true, trim: true },
+    avatarUrl:        { type: String, trim: true },
     otp:              { type: String },           // bcrypt-hashed OTP
     otpExpiresAt:     { type: Date },
     settings: { type: SettingsSchema, default: () => ({}) },

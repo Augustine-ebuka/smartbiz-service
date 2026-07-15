@@ -1,5 +1,7 @@
 import { Expense, IExpense } from '../models/expense.model';
 import { ExpenseCategory } from '../models/expenseCategory.model';
+import { ActivityAction } from '../models/activity.model';
+import activityLogService from '../services/activityLogService';
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -13,7 +15,17 @@ export interface CreateExpenseDTO {
 }
 
 export interface UpdateExpenseDTO extends Partial<CreateExpenseDTO> {}
-
+export interface LogActivityDTO {
+  businessOwnerId: string;
+  actorId: string;
+  actorName: string;
+  actorRole: string;
+  action: ActivityAction;
+  description: string;
+  resourceId?: string;
+  amount?: number;
+  metadata?: Record<string, any>;
+}
 export interface ExpenseFilterDTO {
   categoryId?: string;
   startDate?: string;
@@ -51,6 +63,17 @@ class ExpenseService {
       userId,
       ...payload,
       date: payload.date ? new Date(payload.date) : new Date(),
+    });
+    // activity log
+    await activityLogService.log({
+      businessOwnerId: userId,
+      actorId: userId,
+      actorName: userId,
+      actorRole: 'Expense',
+      action: 'expense.create',
+      description: payload.note || 'Expense expense created',
+      resourceId: expense._id,
+      amount: payload.amount,
     });
 
     return expense.save();
@@ -127,12 +150,34 @@ class ExpenseService {
     ).populate('categoryId', 'name');
 
     if (!expense) throw new Error('Expense not found.');
+    // activity log
+    await activityLogService.log({
+      businessOwnerId: userId,
+      actorId: userId,
+      actorName: userId,
+      actorRole: 'Expense',
+      action: 'expense.update',
+      description: payload.note || 'Expense expense updated',
+      resourceId: expense._id,
+      amount: payload.amount,
+    });
     return expense;
   }
 
   async delete(userId: string, expenseId: string): Promise<void> {
     const result = await Expense.findOneAndDelete({ _id: expenseId, userId });
     if (!result) throw new Error('Expense not found.');
+    // activity log
+    await activityLogService.log({
+      businessOwnerId: userId,
+      actorId: userId,
+      actorName: userId,
+      actorRole: 'Expense',
+      action: 'expense.delete',
+      description: 'Expense expense deleted',
+      resourceId: expenseId,
+      amount: result.amount,
+    });
   }
 
   // ─── Summary / Analytics ──────────────────────────────────────────────────

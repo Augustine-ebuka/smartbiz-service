@@ -26,8 +26,8 @@ class IncomeController {
       res.status(200).json({
         success: true,
         message: 'Income records fetched successfully.',
-        data: result.data,
-        meta: result.meta,
+        data: result,
+        // meta: result.meta,
       });
     } catch (error) {
       next(error);

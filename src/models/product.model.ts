@@ -8,11 +8,17 @@ export type ProductType = 'Good' | 'Service';
 
 export interface IProduct extends Document {
   _id: string;
-  userId: string;       // owner — the logged-in business user
+  userId: string;
   name: string;
   type: ProductType;
   price: number;
   description?: string;
+  imageUrl?: string;
+
+  // ── Inventory fields (only relevant when type === 'Good') ──────────────────
+  trackStock: boolean;           // false for services, true for physical goods
+  stock: number;                 // current stock level
+  lowStockThreshold: number;     // alert when stock falls at or below this
   createdAt: Date;
   updatedAt: Date;
 }
@@ -26,11 +32,18 @@ const ProductSchema = new Schema<IProduct>(
     type:        { type: String, required: true, enum: ['Good', 'Service'] satisfies ProductType[], default: 'Good' },
     price:       { type: Number, required: true, min: 0 },
     description: { type: String, trim: true },
+    imageUrl:      { type: String, trim: true },
+    
+    // Inventory
+    trackStock:        { type: Boolean, default: false },
+    stock:             { type: Number, default: 0, min: 0 },
+    lowStockThreshold: { type: Number, default: 5 },
   },
   { timestamps: true }
 );
 
 ProductSchema.index({ userId: 1, name: 1 });
+ProductSchema.index({ userId: 1, trackStock: 1, stock: 1 });  // for low stock queries
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 

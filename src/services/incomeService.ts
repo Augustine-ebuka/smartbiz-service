@@ -1,6 +1,8 @@
 import { Income, IIncome, PaymentMethod } from '../models/income.model';
 import { Product } from '../models/product.model';
 import { Customer } from '../models/customer.model';
+import { User } from '../models/user.model';
+import inventoryService from './inventory.service';
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -22,35 +24,19 @@ export interface IncomeFilterDTO {
   paymentMethod?: PaymentMethod;
   startDate?: string;
   endDate?: string;
-  search?: string;      // searches note
-  page?: string | number;
-  limit?: string | number;
-}
-
-export interface PaginatedResult<T> {
-  data: T[];
-  meta: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-    hasNextPage: boolean;
-    hasPrevPage: boolean;
-  };
+  search?: string;
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 class IncomeService {
 
-  async create(userId: string, payload: CreateIncomeDTO): Promise<IIncome> {
-    // Validate productId belongs to this user if provided
+  async create(userId: string, payload: CreateIncomeDTO): Promise<IIncome & { inventoryWarning?: string }> {
     if (payload.productId) {
       const product = await Product.findOne({ _id: payload.productId, userId });
       if (!product) throw new Error('Product not found.');
     }
 
-    // Validate customerId belongs to this user if provided
     if (payload.customerId) {
       const customer = await Customer.findOne({ _id: payload.customerId, userId });
       if (!customer) throw new Error('Customer not found.');
@@ -59,60 +45,64 @@ class IncomeService {
     const income = new Income({
       userId,
       ...payload,
-      unit: payload.unit ?? 1,
+      unit:          payload.unit ?? 1,
       paymentMethod: payload.paymentMethod ?? 'Cash',
-      date: payload.date ? new Date(payload.date) : new Date(),
+      date:          payload.date ? new Date(payload.date) : new Date(),
     });
 
-    return income.save();
-  }
+    await income.save();
 
-  async getAll(userId: string, filters: IncomeFilterDTO = {}): Promise<PaginatedResult<IIncome>> {
-    const query: Record<string, any> = { userId };
-    const page = Math.max(Number(filters.page) || 1, 1);
-    const limit = Math.min(Math.max(Number(filters.limit) || 10, 1), 100);
-    const skip = (page - 1) * limit;
+    // ── Auto-deduct stock if product tracks inventory ──────────────────────
+    let inventoryWarning: string | undefined;
 
-    if (filters.productId)     query.productId     = filters.productId;
-    if (filters.customerId)    query.customerId    = filters.customerId;
-    if (filters.paymentMethod) query.paymentMethod = filters.paymentMethod;
+    if (payload.productId) {
+      // Fetch actor info automatically
+      const actor = await User.findById(userId).select('firstName lastName');
+      const actorName = actor ? `${actor.firstName} ${actor.lastName}` : 'Unknown';
 
-    if (filters.startDate || filters.endDate) {
-      query.date = {};
-      if (filters.startDate) query.date.$gte = new Date(filters.startDate);
-      if (filters.endDate)   query.date.$lte = new Date(filters.endDate);
+      const { isLowStock, stockAfter } = await inventoryService.deductForSale(
+        userId,
+        payload.productId,
+        payload.unit ?? 1,
+        income._id.toString(),
+        userId,
+        actorName
+      );
+
+      if (isLowStock) {
+        const product = await Product.findById(payload.productId).select('name');
+        inventoryWarning = stockAfter === 0
+          ? `⚠️ "${product?.name}" is now out of stock.`
+          : `⚠️ "${product?.name}" is running low — only ${stockAfter} left.`;
+      }
     }
 
-    if (filters.search) {
-      query.$or = [
-        { note: { $regex: filters.search, $options: 'i' } },
-      ];
-    }
-
-    const [data, total] = await Promise.all([
-      Income.find(query)
-        .populate('productId',  'name type price')
-        .populate('customerId', 'name email phone')
-        .sort({ date: -1 })
-        .skip(skip)
-        .limit(limit),
-      Income.countDocuments(query),
-    ]);
-
-    const totalPages = Math.ceil(total / limit);
-
-    return {
-      data,
-      meta: {
-        page,
-        limit,
-        total,
-        totalPages,
-        hasNextPage: page < totalPages,
-        hasPrevPage: page > 1,
-      },
-    };
+    return Object.assign(income, { inventoryWarning });
   }
+
+
+  async getAll(userId: string, filters: IncomeFilterDTO = {}): Promise<IIncome[]> {
+     const query: Record<string, any> = { userId };
+ 
+     if (filters.productId)     query.productId     = filters.productId;
+     if (filters.customerId)    query.customerId    = filters.customerId;
+     if (filters.paymentMethod) query.paymentMethod = filters.paymentMethod;
+ 
+     if (filters.startDate || filters.endDate) {
+       query.date = {};
+       if (filters.startDate) query.date.$gte = new Date(filters.startDate);
+       if (filters.endDate)   query.date.$lte = new Date(filters.endDate);
+     }
+ 
+     if (filters.search) {
+       query.$or = [{ note: { $regex: filters.search, $options: 'i' } }];
+     }
+ 
+     return Income.find(query)
+       .populate('productId',  'name type price')
+       .populate('customerId', 'name email phone')
+       .sort({ date: -1 });
+   }
 
   async getById(userId: string, incomeId: string): Promise<IIncome> {
     const income = await Income.findOne({ _id: incomeId, userId })
