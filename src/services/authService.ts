@@ -61,7 +61,8 @@ class AuthService {
 
     // Generate OTP, store it, and send verification email
     const otp = await otpService.generateAndStore(newUser._id.toString());
-    await emailService.sendOtp({ to: email, firstName, otp });
+    const emailResponse = await emailService.sendOtp({ to: email, firstName, otp });
+    console.log(emailResponse, "Email response data");
 
     const token = generateToken(newUser._id.toString());
 
