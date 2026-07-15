@@ -283,6 +283,8 @@ class EmailService {
 
 async sendOtp({ to, firstName, otp }: SendOtpOptions) {
   console.log("Starting email send");
+  console.log("EMAIL_USER:", process.env.EMAIL_USER);
+  console.log("EMAIL_PASS exists:", !!process.env.EMAIL_PASS);
 
   const response = await this.transporter.sendMail({
     from: `"SmartBiz" <${process.env.EMAIL_USER}>`,
