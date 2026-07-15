@@ -23,11 +23,11 @@ export const uploadLogo = multer({
   limits: { fileSize: 2 * 1024 * 1024 },   // 2MB max
 }).single('logo');                           // field name expected from FE
 
-// ─── Receipt upload (expense) ─────────────────────────────────────────────────
-export const uploadReceipt = multer({
-  storage: makeStorage('expense-receipts', ['jpg', 'jpeg', 'png', 'webp', 'pdf']),
+// ─── File upload (product) ─────────────────────────────────────────────────
+export const uploadFile = multer({
+  storage: makeStorage('product-files', ['jpg', 'jpeg', 'png', 'webp', 'pdf', 'docx', 'xlsx', 'pptx', 'ppt']),
   limits: { fileSize: 5 * 1024 * 1024 },   // 5MB max
-}).single('receipt');                        // field name expected from FE
+}).single('file');                           // field name expected from FE
 
 // ─── Avatar upload (user profile) ────────────────────────────────────────────
 export const uploadAvatar = multer({

@@ -182,6 +182,68 @@ export const validateCustomer = async ({productCode, customerId}: {productCode: 
     }
   };
 
+//   Create Reserved Account(General)​Copy link
+
+// Auth Required
+// This endpoint allows the creation of dedicated virtual accounts for your customers.
+// {
+//   "accountReference": "abc1niui23",
+//   "accountName": "Test Reserved Account",
+//   "currencyCode": "NGN",
+//   "contractCode": "5867418298",
+//   "customerEmail": "test@tester.com",
+//   "customerName": "John Doe",
+//   "bvn": "21212121212",
+//   "getAllAvailableBanks": "true",
+//   "preferredBanks": [
+//     "50515"
+//   ],
+//   "incomeSplitConfig": [
+//     {
+//       "subAccountCode": "MFY_SUB_319452883228",
+//       "feePercentage": 10.5,
+//       "splitPercentage": 20,
+//       "feeBearer": true,
+//       "splitAmount": 100
+//     }
+//   ],
+//   "restrictPaymentSource": true,
+//   "allowedPaymentSources": {
+//     "bvns": [
+//       "21212121212",
+//       "20202020202"
+//     ],
+//     "bankAccounts": [
+//       {
+//         "accountNumber": "0068687503",
+//         "bankCode": "232"
+//       }
+//     ],
+//     "accountNames": [
+//       "SAMUEL DAMILARE OGUNNAIKE"
+//     ]
+//   },
+//   "nin": "12345678901"
+// }
+
+export const createReservedAccount = async (request: any) => {
+  try {
+    if (!request || typeof request !== 'object') {
+      throw new Error('Reserved account request payload is required');
+    }
+
+    console.log('Reserved account request payload:', request);
+
+    const response = await monnifyAxios.post('/api/v2/bank-transfer/reserved-accounts', request);
+    console.log(response, "Reserved account response data");
+    return response?.data?.responseBody || {};
+  } catch (error: any) {
+    if (axios.isAxiosError(error)) {
+      throw new Error(error.response?.data?.responseMessage || error.message);
+    }
+    throw error;
+  }
+}
 
 
 

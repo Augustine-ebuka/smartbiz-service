@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import AuthService from '../services/authService';
 import WalletService from '../services/walletService';
 import { breakPoint } from '../config/config';
+import { createReservedAccount } from '../utils/monnifyService';
 
 
 class WalletController {
@@ -91,7 +92,34 @@ class WalletController {
             res.status(400).json({ error: error.message });
         }
     }
+    async createReservedAccount(req: Request, res: Response, next: any): Promise<void> {
+        try {
+            const requestPayload = req.body?.request ?? req.body;
+            console.log('createReservedAccount body:', requestPayload);
+
+            if (!requestPayload || typeof requestPayload !== 'object') {
+                res.status(400).json({
+                    success: false,
+                    message: 'Request payload is required',
+                });
+                return;
+            }
+
+            const reservedAccount = await createReservedAccount(requestPayload);
+
+            res.status(200).json({
+                success: true,
+                message: 'Reserved account created successfully',
+                data: reservedAccount,
+            });
+        } catch (error: any) {
+            res.status(400).json({ error: error.message });
+        }
+    }
 
 }
+
+// moniify wallet controller
+
 
 export default new WalletController();

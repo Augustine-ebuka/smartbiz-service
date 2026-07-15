@@ -11,5 +11,6 @@ router.post('/deposit', authenticateToken, WalletController.deposit);
 router.post('/withdraw', authenticateToken, WalletController.withdraw);
 router.post('/verify-transaction', authenticateToken, WalletController.verifyTransaction);
 router.get('/ledger', authenticateToken, WalletController.getLedger);
+router.post('/create-reserved-account', authenticateToken, WalletController.createReservedAccount);
 
 export default router;

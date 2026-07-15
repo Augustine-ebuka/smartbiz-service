@@ -37,7 +37,7 @@ class UploadController {
    * Multipart form — field: "receipt"
    * Just returns the URL — expense controller saves it to the expense doc
    */
-  async uploadReceipt(req: Request, res: Response, next: NextFunction) {
+  async uploadFile(req: Request, res: Response, next: NextFunction) {
     try {
       if (!req.file) {
         res.status(400).json({ success: false, message: 'No file uploaded.' });
@@ -48,7 +48,7 @@ class UploadController {
 
       res.status(200).json({
         success: true,
-        message: 'Receipt uploaded successfully.',
+        message: 'Asset uploaded successfully.',
         data: { receiptUrl },
       });
     } catch (error) {
@@ -84,6 +84,7 @@ class UploadController {
       next(error);
     }
   }
+  
 
 }
 
