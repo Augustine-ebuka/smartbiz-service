@@ -29,7 +29,7 @@ interface SendSaleskeeperInviteOptions {
 
 // ─── Resend client ────────────────────────────────────────────────────────────
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = new Resend(process.env.RESEND_API_KEY || '');
 
 // Sender address — must match your verified domain in Resend dashboard
 // e.g. "Your Business App <no-reply@yourdomain.com>"
