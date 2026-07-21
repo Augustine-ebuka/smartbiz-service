@@ -357,7 +357,7 @@ export const updateSubAccountHandler = async (
 
 export const handleMonnifyWebhook = async (req: Request, res: Response): Promise<void> => {
   try {
-    // const monnifySignature = req.headers['monnify-signature'];
+    const monnifySignature = req.headers['monnify-signature'];
     const secretKey = process.env.MONNIFY_SECRET_KEY || '';
 
     // 1. Verify webhook authenticity (Security check)
@@ -367,10 +367,10 @@ export const handleMonnifyWebhook = async (req: Request, res: Response): Promise
       .update(JSON.stringify(req.body))
       .digest('hex');
 
-    // if (monnifySignature !== computedSignature) {
-    //   res.status(401).json({ message: 'Invalid transaction signature' });
-    //   return;
-    // }
+    if (monnifySignature !== computedSignature) {
+      res.status(401).json({ message: 'Invalid transaction signature' });
+      return;
+    }
 
     const { eventType, eventData } = req.body;
 
