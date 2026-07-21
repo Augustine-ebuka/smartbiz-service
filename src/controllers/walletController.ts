@@ -6,6 +6,7 @@ import { User } from '../models/user.model';
 import crypto from 'crypto';
 import { Transaction } from '../models/transaction.model';
 import { Income } from '../models/income.model';
+import { Customer } from '../models/customer.model';
 /**
  * POST /reserved-accounts
  * Creates a dedicated virtual account for a customer.
@@ -84,30 +85,30 @@ export const initializeTransactionHandler = async (
   next: NextFunction,
 ): Promise<void> => {
   try {
+    // const merchantUserId = req.userId as string;  // ← from JWT, never from body
+
     const {
       amount,
       customerName,
       customerEmail,
-
+      customerPhone,
       redirectUrl,
       paymentDescription,
-      paymentReference,
       splitConfig,
-      merchantUserId,
       address,
-      products
-
+      products,
+      merchantUserId
     }: {
       amount?: number;
       customerName?: string;
       customerEmail?: string;
+      customerPhone?: string;
       redirectUrl?: string;
       paymentDescription?: string;
-      paymentReference?: string;
       splitConfig?: SplitConfigEntry[];
-      merchantUserId?: string;
       address?: string;
       products?: any[];
+      merchantUserId?: string;
     } = req.body ?? {};
 
     if (!amount || !customerName || !customerEmail || !redirectUrl) {
@@ -117,7 +118,10 @@ export const initializeTransactionHandler = async (
       });
       return;
     }
-    console.log(req.body, "request body ..............................");
+
+    // Always generate server-side — never trust client-supplied references
+    const paymentReference = `PF-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+
     const transaction = await initializeTransaction({
       amount,
       customerName,
@@ -128,28 +132,41 @@ export const initializeTransactionHandler = async (
       incomeSplitConfig: splitConfig,
     });
 
-    console.log(transaction, "transaction ..............................");
+    // Find or create customer — always reassign so _id is always available
+    console.log(merchantUserId, "merchantUserId ..............................");
+    let customer = await Customer.findOne({ email: customerEmail, userId: merchantUserId });
+    if (!customer) {
+      customer = await Customer.create({
+        userId: merchantUserId,   // scope customer to this business owner
+        name:   customerName,
+        email:  customerEmail,
+        phone:  customerPhone,
+        address,
+      });
+    }
 
-    // create a transaction record in db
+    // Map fields explicitly — don't dump the entire Monnify response into `data`
     const transactionRecord = await Transaction.create({
-      data: transaction,
       amount,
-      status: 'pending',
-      type: 'purchase',
-      trans_ref: transaction.transactionReference,
-      payment_reference: transaction.paymentReference,
-      user_id: merchantUserId,
+      status:            'pending',
+      type:              'purchase',
+      trans_ref:          transaction.transactionReference,
+      payment_reference:  transaction.paymentReference,
+      checkout_url:       transaction.checkoutUrl,
+      user_id:            merchantUserId,
+      customer_id:        customer._id,
       address,
-      products,
+      products:           products ?? [],
     });
 
-
-    console.log(transactionRecord, "transactionRecord ..............................");
-
-    // transaction.checkoutUrl is where the client should redirect the user
     res.status(200).json({
       success: true,
-      data: transaction,
+      data: {
+        checkoutUrl:          transaction.checkoutUrl,
+        transactionReference: transaction.transactionReference,
+        paymentReference:     transaction.paymentReference,
+        transactionId:        transactionRecord._id,
+      },
     });
   } catch (error) {
     next(error);
@@ -407,13 +424,9 @@ export const handleMonnifyWebhook = async (req: Request, res: Response): Promise
               productId: product.product_id,
               unit: product.quantity,
               amount: product.quantity * product.price,
+              customerId: transaction.customer_id,
             });
           }
-          await Income.create({
-            userId: transaction.user_id,
-            amount: amountPaid,
-            transactionId: transaction._id,
-          });
         console.log(`Payment confirmed for reference: ${paymentReference}, Amount: ${amountPaid}`);
       }
     }

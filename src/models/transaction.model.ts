@@ -17,6 +17,8 @@ export interface ITransaction extends Document {
     data: any
     address: string;
     products: any[];
+    customer_id: Schema.Types.ObjectId;
+
 }
 
 const TransactionSchema: Schema = new Schema({
@@ -35,6 +37,8 @@ const TransactionSchema: Schema = new Schema({
     data: { type: Object, required: false },
     address: { type: String, required: false },
     products: [{ type: Object, required: false }],
+    customer_id: { type: Schema.Types.ObjectId, ref: 'Customer', required: false },
+
 }, {
     timestamps: true
 });
