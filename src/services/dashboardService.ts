@@ -187,7 +187,7 @@ class DashboardService {
       _id:         r._id.toString(),
       type:        'expense' as const,
       amount:      r.amount,
-      description: r.vendor ?? r.categoryId?.name ?? 'Uncategorised expense',
+      description: r.categoryId?.name ?? 'Uncategorised expense',
       date:        r.date,
       createdAt:   r.createdAt,
     }));

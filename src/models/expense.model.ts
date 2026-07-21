@@ -21,7 +21,11 @@ const ExpenseSchema = new Schema<IExpense>(
   {
     userId:     { type: String, required: true, index: true },
     amount:     { type: Number, required: true, min: 0 },
-    categoryId: { type: Schema.Types.ObjectId, ref: 'ExpenseCategory' },
+    categoryId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ExpenseCategory',
+
+  },
     date:       { type: Date, required: true, default: Date.now },
     vendor:     { type: String, trim: true },
     note:       { type: String, trim: true },

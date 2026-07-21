@@ -6,6 +6,7 @@ class DashboardController {
   async getDashboard(req: any, res: Response, next: NextFunction) {
     try {
       const userId = req.businessOwnerId as string;
+      console.log(userId, "userId ..............................");
       const data = await DashboardService.getDashboard(userId);
       res.status(200).json({
         success: true,
