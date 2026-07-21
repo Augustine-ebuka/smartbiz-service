@@ -7,6 +7,7 @@ export interface ITransaction extends Document {
     status: "pending" | "successful" | "failed"; // fixed: "pending" was duplicated, added "failed"
     amount: number;
     trans_ref: string;
+    payment_reference: string;
     purchase_info: {
         product_id: Schema.Types.ObjectId;
         quantity: number;
@@ -14,6 +15,8 @@ export interface ITransaction extends Document {
     },
     provider: string;
     data: any
+    address: string;
+    products: any[];
 }
 
 const TransactionSchema: Schema = new Schema({
@@ -22,6 +25,7 @@ const TransactionSchema: Schema = new Schema({
     status: { type: String, enum: ['pending', 'successful', 'failed'], default: 'pending' },
     amount: { type: Number, required: true },
     trans_ref: { type: String, required: true, unique: true },
+    payment_reference: { type: String, required: false },
     purchase_info: {
         product_id: { type: Schema.Types.ObjectId, ref: 'Product', required: false },
         quantity: { type: Number, required: false },
@@ -29,6 +33,8 @@ const TransactionSchema: Schema = new Schema({
     },
     provider: { type: String, required: false },
     data: { type: Object, required: false },
+    address: { type: String, required: false },
+    products: [{ type: Object, required: false }],
 }, {
     timestamps: true
 });

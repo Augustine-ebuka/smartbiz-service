@@ -7,6 +7,8 @@ import ExpenseCategoryController from '../controllers/expenseCategoryController'
 import {resolveBusinessOwner} from '../middlewares/businessOwnerMiddleware';
 const router = Router();
 
+// public products of a business ownwer
+router.get('/public-products', ProductController.getPublicProducts);
 // All catalog routes require authentication
 router.use(authenticateToken);
 

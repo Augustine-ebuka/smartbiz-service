@@ -14,6 +14,7 @@ export interface IProduct extends Document {
   price: number;
   description?: string;
   imageUrl?: string;
+  isPublic: boolean;
 
   // ── Inventory fields (only relevant when type === 'Good') ──────────────────
   trackStock: boolean;           // false for services, true for physical goods
@@ -33,6 +34,7 @@ const ProductSchema = new Schema<IProduct>(
     price:       { type: Number, required: true, min: 0 },
     description: { type: String, trim: true },
     imageUrl:      { type: String, trim: true },
+    isPublic:      { type: Boolean, default: false },
     
     // Inventory
     trackStock:        { type: Boolean, default: false },

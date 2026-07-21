@@ -1,16 +1,41 @@
-import express from 'express';
-import AuthController from '../controllers/authController';
+import { Router } from 'express';
+import {
+  createReservedAccountHandler,
+  initializeTransactionHandler,
+  verifyBankAccountHandler,
+  createSubAccountHandler,
+  deleteSubAccountHandler,
+  fetchSubAccountsHandler,
+  fetchBanksListHandler,
+  updateSubAccountHandler,
+  handleMonnifyWebhook,
+} from '../controllers/walletController';
 import { authenticateToken } from '../middlewares/authMiddleware';
-import WalletController from '../controllers/walletController';
+import { resolveBusinessOwner, requireOwner } from '../middlewares/businessOwnerMiddleware';
+const router = Router();
 
-const router = express.Router();
+router.post('/reserved-accounts', createReservedAccountHandler);
 
-router.post('/create', authenticateToken, WalletController.createWallet);
-router.get('/:user_id', authenticateToken, WalletController.getWallet);
-router.post('/deposit', authenticateToken, WalletController.deposit);
-router.post('/withdraw', authenticateToken, WalletController.withdraw);
-router.post('/verify-transaction', authenticateToken, WalletController.verifyTransaction);
-router.get('/ledger', authenticateToken, WalletController.getLedger);
-router.post('/create-reserved-account', authenticateToken, WalletController.createReservedAccount);
+// webhook handler
+router.post('/webhook', handleMonnifyWebhook);
+
+// e.g. GET /bank-accounts/verify?accountNumber=9035244019&bankCode=100033
+router.get('/bank-accounts/verify', verifyBankAccountHandler);
+
+// Returns a checkoutUrl to redirect the user to for payment
+router.post('/transactions/initialize', initializeTransactionHandler);
+
+// POST /sub-accounts
+router.post('/sub-accounts', authenticateToken, resolveBusinessOwner, requireOwner, createSubAccountHandler);
+// GET /sub-accounts
+router.get('/sub-accounts', authenticateToken, resolveBusinessOwner, requireOwner, fetchSubAccountsHandler);
+// GET /banks-list
+router.get('/banks-list', fetchBanksListHandler);
+// PUT /sub-accounts/:subAccountCode
+router.put('/sub-accounts/:subAccountCode', updateSubAccountHandler);
+
+// DELETE /sub-accounts/:subAccountCode
+router.delete('/sub-accounts/:subAccountCode', deleteSubAccountHandler);
+
 
 export default router;

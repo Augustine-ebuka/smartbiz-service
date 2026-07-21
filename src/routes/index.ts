@@ -4,7 +4,7 @@ const router = express.Router();
 
 import walletRoute from './wallet.route';
 import transactionRoute from './transaction.route';
-import billRoute from './bills.route';
+// import billRoute from './bills.route';
 import competitorRoute from './competitors.route';
 import whatsappRoute from './whatsapp.route';
 import catalogRoute from './catalog.route';
@@ -21,7 +21,7 @@ import activityLog from './activityLog.route'
 router.use("/v1/auth", authRoute);
 router.use("/v1/wallet", walletRoute);
 router.use("/v1/transactions", transactionRoute);
-router.use("/v1/bills", billRoute);
+// router.use("/v1/bills", billRoute);
 router.use("/v1/competitors", competitorRoute);
 router.use("/v1/whatsapp", whatsappRoute);
 router.use("/v1/catalog", catalogRoute);

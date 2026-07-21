@@ -71,6 +71,21 @@ class ProductController {
       next(error);
     }
   }
+  
+  async getPublicProducts(req: Request, res: Response, next: NextFunction) {
+    try {
+      console.log(req.query.userId);
+      const userId = req.query.userId as string;
+      const products = await ProductService.getPublicProducts(userId);
+      res.status(200).json({
+        success: true,
+        message: 'Public products fetched successfully.',
+        data: products,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 
 }
 

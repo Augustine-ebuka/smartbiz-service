@@ -37,6 +37,8 @@ export interface ICompanyProfile {
   contact?: IContactInfo;
   banking?: IBankingDetails;
   invoiceFooterNote?: string;
+  subAccountCode?: string;
+  merchantStatus?: boolean;
 }
 
 export interface IAppPreferences {
@@ -133,6 +135,8 @@ const CompanyProfileSchema = new Schema<ICompanyProfile>(
     contact:            { type: ContactInfoSchema },
     banking:            { type: BankingDetailsSchema },
     invoiceFooterNote:  { type: String, trim: true },
+    subAccountCode:     { type: String, trim: true },
+    merchantStatus:     { type: Boolean, default: false },
   },
   { _id: false }
 );

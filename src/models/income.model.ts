@@ -2,7 +2,7 @@ import mongoose, { Document, Schema } from 'mongoose';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type PaymentMethod = 'Cash' | 'Bank Transfer' | 'Card' | 'Mobile Money' | 'Cheque' | 'Other';
+export type PaymentMethod = 'Cash' | 'Bank Transfer' | 'Card' | 'Mobile Money' | 'Cheque' | 'monnify' | 'Other';
 
 // ─── Interface ────────────────────────────────────────────────────────────────
 
@@ -18,6 +18,8 @@ export interface IIncome extends Document {
   note?: string;
   createdAt: Date;
   updatedAt: Date;
+  transactionId?: mongoose.Types.ObjectId;
+  // ref → Transaction (optional)
 }
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
@@ -32,11 +34,13 @@ const IncomeSchema = new Schema<IIncome>(
     paymentMethod: {
       type: String,
       required: true,
-      enum: ['Cash', 'Bank Transfer', 'Card', 'Mobile Money', 'Cheque', 'Other'] satisfies PaymentMethod[],
+      enum: ['Cash', 'Bank Transfer', 'Card', 'Mobile Money', 'Cheque','monnify','Other'] satisfies PaymentMethod[],
       default: 'Cash',
     },
+    transactionId: { type: Schema.Types.ObjectId, ref: 'Transaction' }, // ref → Transaction (optional)
     date: { type: Date, required: true, default: Date.now },
     note: { type: String, trim: true },
+   
   },
   { timestamps: true }
 );

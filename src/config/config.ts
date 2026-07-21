@@ -37,6 +37,7 @@ export const MONNIFY_CONFIG = {
   host: process.env.MONNIFY_API_URL || "https://sandbox.monnify.com/api/v1",
   apiKey: process.env.MONNIFY_API_KEY,
   secretKey: process.env.MONNIFY_SECRET_KEY,
+  config: process.env.MONNIFY_CONFIG || 1019252431,
 };
 
 
