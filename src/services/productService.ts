@@ -67,7 +67,7 @@ class ProductService {
       if (!businessOwner.settings.companyProfile.merchantStatus) throw new Error('User is not a merchant.');
 
       // return public products
-      const products = await Product.find({ userId: businessOwner._id}).sort({ createdAt: -1 });
+      const products = await Product.find({ userId: businessOwner._id, isPublic: true }).sort({ createdAt: -1 });
       // return business info and products info
       return {
         businessOwner: businessOwner.settings.companyProfile,
@@ -87,7 +87,6 @@ class ProductService {
   const existingProducts = await Product.find({
     _id: { $in: products },
     userId,
-    isPublic: true,
   }).select('_id');
 
   if (existingProducts.length === 0) {
