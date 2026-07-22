@@ -7,6 +7,8 @@ import crypto from 'crypto';
 import { Transaction } from '../models/transaction.model';
 import { Income } from '../models/income.model';
 import { Customer } from '../models/customer.model';
+import inventoryService from '../services/inventory.service';
+import {Product} from '../models/product.model';
 /**
  * POST /reserved-accounts
  * Creates a dedicated virtual account for a customer.
@@ -418,7 +420,7 @@ export const handleMonnifyWebhook = async (req: Request, res: Response): Promise
           // loop through products and create an income record for each product
           const products = transaction.products || [];
           for (const product of products) {
-            await Income.create({
+            const income = await Income.create({
               userId: transaction.user_id,
               paymentMethod: 'monnify',
               productId: product.product_id,
@@ -426,6 +428,15 @@ export const handleMonnifyWebhook = async (req: Request, res: Response): Promise
               amount: product.quantity * product.price,
               customerId: transaction.customer_id,
             });
+             const { isLowStock, stockAfter } = await inventoryService.deductForSale(
+                    transaction.user_id.toString(),
+                    product.product_id.toString(),
+                    product.quantity,
+                    income._id,
+                    transaction.user_id.toString(),
+                    "Monnify"
+                  );
+                  console.log({isLowStock, stockAfter});
           }
         console.log(`Payment confirmed for reference: ${paymentReference}, Amount: ${amountPaid}`);
       }

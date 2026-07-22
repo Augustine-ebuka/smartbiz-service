@@ -87,6 +87,21 @@ class ProductController {
     }
   }
 
+  async togglePublic(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = req.userId as string;
+      const products = req.body.products as string[];
+      console.log(req.body);
+      await ProductService.togglePublic(userId, products);
+      res.status(200).json({
+        success: true,
+        message: 'Product public status toggled successfully.',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
 }
 
 export default new ProductController();

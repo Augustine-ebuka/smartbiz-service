@@ -35,9 +35,12 @@ router.delete('/customers/:id', CustomerController.delete);
 
 router.post  ('/products',     ProductController.create);
 router.get   ('/products',     ProductController.getAll);
+router.post('/products/toggle-public', ProductController.togglePublic);
 router.get   ('/products/:id', ProductController.getById);
 router.patch ('/products/:id', ProductController.update);
 router.delete('/products/:id', ProductController.delete);
+
+
 
 // ─── Expense Categories ───────────────────────────────────────────────────────
 // POST   /api/catalog/expense-categories         → create category

@@ -77,7 +77,40 @@ class ProductService {
 
   
     }
-    
+
+  async togglePublic(userId: string, products: string[]): Promise<void> {
+  if (!products || products.length === 0) {
+    throw new Error('No product IDs provided.');
   }
+
+  // Verify all products exist and belong to this user before touching anything
+  const existingProducts = await Product.find({
+    _id: { $in: products },
+    userId,
+  }).select('_id');
+
+  if (existingProducts.length === 0) {
+    throw new Error('No matching products found.');
+  }
+
+  // Warn if some IDs were not found or don't belong to this user
+  if (existingProducts.length !== products.length) {
+    const foundIds = existingProducts.map(p => p._id.toString());
+    const missing  = products.filter(id => !foundIds.includes(id));
+    throw new Error(`Some products were not found or do not belong to you: ${missing.join(', ')}`);
+  }
+
+  // Atomically toggle each — $not flips the boolean in one DB operation
+  // No race condition since we're not reading then writing the value
+  await Product.bulkWrite(
+    existingProducts.map(product => ({
+      updateOne: {
+        filter: { _id: product._id, userId },
+        update: [{ $set: { isPublic: { $not: '$isPublic' } } }],  // ← pipeline update
+      },
+    }))
+  );
+}
+}
 
 export default new ProductService();
