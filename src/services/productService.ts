@@ -87,6 +87,7 @@ class ProductService {
   const existingProducts = await Product.find({
     _id: { $in: products },
     userId,
+    isPublic: true,
   }).select('_id');
 
   if (existingProducts.length === 0) {
