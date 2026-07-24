@@ -21,9 +21,39 @@ class ProductService {
     return product.save();
   }
 
-  async getAll(userId: string): Promise<IProduct[]> {
-    return Product.find({ userId }).sort({ createdAt: -1 });
+  async getAll(
+  userId: string,
+  page = 1,
+  limit = 20,
+  search?: string,
+  type?: 'Good' | 'Service'
+): Promise<{ products: IProduct[]; total: number; page: number; totalPages: number }> {
+  const query: Record<string, any> = { userId };
+
+  if (search) {
+    query.$or = [
+      { name:        { $regex: search, $options: 'i' } },
+      { description: { $regex: search, $options: 'i' } },
+    ];
   }
+
+  if (type) query.type = type;
+
+  const skip  = (page - 1) * limit;
+  const total = await Product.countDocuments(query);
+
+  const products = await Product.find(query)
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit);
+
+  return {
+    products,
+    total,
+    page,
+    totalPages: Math.ceil(total / limit),
+  };
+}
 
   async getById(userId: string, productId: string): Promise<IProduct> {
     const product = await Product.findOne({ _id: productId, userId });

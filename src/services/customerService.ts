@@ -21,9 +21,37 @@ class CustomerService {
     return customer.save();
   }
 
-  async getAll(userId: string): Promise<ICustomer[]> {
-    return Customer.find({ userId }).sort({ createdAt: -1 });
+ async getAll(
+  userId: string,
+  page = 1,
+  limit = 20,
+  search?: string
+): Promise<{ customers: ICustomer[]; total: number; page: number; totalPages: number }> {
+  const query: Record<string, any> = { userId };
+
+  if (search) {
+    query.$or = [
+      { name:  { $regex: search, $options: 'i' } },
+      { email: { $regex: search, $options: 'i' } },
+      { phone: { $regex: search, $options: 'i' } },
+    ];
   }
+
+  const skip  = (page - 1) * limit;
+  const total = await Customer.countDocuments(query);
+
+  const customers = await Customer.find(query)
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit);
+
+  return {
+    customers,
+    total,
+    page,
+    totalPages: Math.ceil(total / limit),
+  };
+}
 
   async getById(userId: string, customerId: string): Promise<ICustomer> {
     const customer = await Customer.findOne({ _id: customerId, userId });

@@ -15,6 +15,7 @@ import saleskeeperRoute from './saleskeeper.router';
 import uploadRoutes from './upload.route';
 import inventoryRoute from './inventory.routes';
 import activityLog from './activityLog.route'
+import debtRecordRoute from './debtrecord.route';
 
 
 
@@ -32,6 +33,7 @@ router.use("/v1/saleskeepers", saleskeeperRoute);
 router.use("/v1/upload", uploadRoutes);
 router.use("/v1/inventory", inventoryRoute);
 router.use("/v1/activity-log", activityLog);
+router.use("/v1/debt-records", debtRecordRoute);
 
 
 

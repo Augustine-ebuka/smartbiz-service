@@ -22,19 +22,24 @@ class CustomerController {
     }
   }
 
-  async getAll(req: Request, res: Response, next: NextFunction) {
-    try {
-      const userId = (req as any).businessOwnerId as string;
-      const customers = await CustomerService.getAll(userId);
-      res.status(200).json({
-        success: true,
-        message: 'Customers fetched successfully.',
-        data: customers,
-      });
-    } catch (error) {
-      next(error);
-    }
+async getAll(req: Request, res: Response, next: NextFunction) {
+  try {
+    const userId = (req as any).businessOwnerId as string || '';
+    const page   = parseInt(req.query.page  as string) || 1;
+    const limit  = parseInt(req.query.limit as string) || 10;
+    const search = req.query.search as string | undefined;
+
+    const result = await CustomerService.getAll(userId, page, limit, search);
+
+    res.status(200).json({
+      success: true,
+      message: 'Customers fetched successfully.',
+      data: result,
+    });
+  } catch (error) {
+    next(error);
   }
+}
 
   async getById(req: Request, res: Response, next: NextFunction) {
     try {

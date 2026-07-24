@@ -17,19 +17,25 @@ class ProductController {
     }
   }
 
-  async getAll(req: Request, res: Response, next: NextFunction) {
-    try {
-      const userId = (req as any).businessOwnerId as string;
-      const products = await ProductService.getAll(userId);
-      res.status(200).json({
-        success: true,
-        message: 'Products fetched successfully.',
-        data: products,
-      });
-    } catch (error) {
-      next(error);
-    }
+async getAll(req: Request, res: Response, next: NextFunction) {
+  try {
+    const userId = (req as any).businessOwnerId as string;
+    const page   = parseInt(req.query.page  as string) || 1;
+    const limit  = parseInt(req.query.limit as string) || 10;
+    const search = req.query.search as string | undefined;
+    const type   = req.query.type   as 'Good' | 'Service' | undefined;
+
+    const result = await ProductService.getAll(userId, page, limit, search, type);
+
+    res.status(200).json({
+      success: true,
+      message: 'Products fetched successfully.',
+      data: result,
+    });
+  } catch (error) {
+    next(error);
   }
+}
 
   async getById(req: Request, res: Response, next: NextFunction) {
     try {
