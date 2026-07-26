@@ -1,5 +1,7 @@
 import { Expense } from '../models/expense.model';
 import { Income } from '../models/income.model';
+import { Customer } from '../models/customer.model';
+import { User } from '../models/user.model';
 
 // ─── Helpers (all boundaries in UTC to match MongoDB storage) ────────────────
 
@@ -48,6 +50,8 @@ export interface DashboardData {
     expensesToday: number;
     profitThisMonth: number;
     cashBalance: number;
+    totalCustomers: number;
+    totalStaff: number;
   };
   last7Days: DayPoint[];
   recentActivity: RecentActivityItem[];
@@ -78,6 +82,8 @@ class DashboardService {
       last7DaysExpenses,
       recentIncome,
       recentExpenses,
+      totalCustomers,
+      totalStaff,
     ] = await Promise.all([
 
       Income.aggregate([
@@ -144,6 +150,12 @@ class DashboardService {
         .sort({ createdAt: -1 })
         .limit(RECENT_ACTIVITY_LIMIT)
         .lean(),
+
+      // ── Total customers for this business ─────────────────────────────────
+      Customer.countDocuments({ userId }),
+
+      // ── Total staff (saleskeepers) invited by this owner ──────────────────
+      User.countDocuments({ ownerId: userId, role: 'staff', isActive: true }),
     ]);
 
     // ── Build KPIs ────────────────────────────────────────────────────────────
@@ -153,6 +165,8 @@ class DashboardService {
       expensesToday:   expensesToday[0]?.total   ?? 0,
       profitThisMonth: (incomeThisMonth[0]?.total  ?? 0) - (expensesThisMonth[0]?.total ?? 0),
       cashBalance:     (allTimeIncome[0]?.total    ?? 0) - (allTimeExpenses[0]?.total   ?? 0),
+      totalCustomers,
+      totalStaff,
     };
 
     // ── Build 7-day chart data ────────────────────────────────────────────────
@@ -187,7 +201,7 @@ class DashboardService {
       _id:         r._id.toString(),
       type:        'expense' as const,
       amount:      r.amount,
-      description: r.categoryId?.name ?? 'Uncategorised expense',
+      description: r.vendor ?? r.categoryId?.name ?? 'Uncategorised expense',
       date:        r.date,
       createdAt:   r.createdAt,
     }));

@@ -11,5 +11,6 @@ const router = Router();
 // GET /api/reports?range=custom&startDate=2026-01-01&endDate=2026-03-31
 
 router.get('/', authenticateToken, resolveBusinessOwner, ReportsController.getReports);
+// router.get('/', authenticateToken, resolveBusinessOwner, ReportsController.getReports);
 
 export default router;
