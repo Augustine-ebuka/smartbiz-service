@@ -27,13 +27,37 @@ interface SendSaleskeeperInviteOptions {
   tempPassword: string;
 }
 
+
+interface SendSaleNotificationOptions {
+  to: string;                      // business owner email
+  ownerName: string;
+  businessName: string;
+  customerName: string;
+  products: Array<{ name: string; quantity: number; price: number }>;
+  totalAmount: number;
+  paymentReference: string;
+  paidAt: Date;
+}
+
+interface SendPurchaseReceiptOptions {
+  to: string;                      // customer email
+  customerName: string;
+  businessName: string;
+  businessEmail?: string;
+  businessPhone?: string;
+  products: Array<{ name: string; quantity: number; price: number }>;
+  totalAmount: number;
+  paymentReference: string;
+  paidAt: Date;
+}
+
 // ─── Resend client ────────────────────────────────────────────────────────────
 
-const resend = new Resend(process.env.RESEND_API_KEY || '');
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Sender address — must match your verified domain in Resend dashboard
 // e.g. "Your Business App <no-reply@yourdomain.com>"
-const FROM_ADDRESS = process.env.EMAIL_FROM ?? 'SmartBiz <onboarding@resend.dev>';
+const FROM_ADDRESS = process.env.EMAIL_FROM ?? 'Your Business App <onboarding@resend.dev>';
 
 // ─── Templates ────────────────────────────────────────────────────────────────
 
@@ -266,6 +290,215 @@ function saleskeeperInviteTemplate(name: string, businessName: string, email: st
   `;
 }
 
+// ─── Sale Notification Template (to business owner) ──────────────────────────
+
+function saleNotificationTemplate(
+  ownerName: string,
+  businessName: string,
+  customerName: string,
+  products: Array<{ name: string; quantity: number; price: number }>,
+  totalAmount: number,
+  paymentReference: string,
+  paidAt: Date
+): string {
+  const fmt = (n: number) => `₦${n.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+  const dateStr = new Date(paidAt).toLocaleString('en-NG', {
+    dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Lagos',
+  });
+
+  const productRows = products.map(p => `
+    <tr>
+      <td style="padding:10px 0;border-bottom:1px solid #f3f4f6;color:#374151;font-size:14px">${p.name}</td>
+      <td style="padding:10px 0;border-bottom:1px solid #f3f4f6;color:#374151;font-size:14px;text-align:center">${p.quantity}</td>
+      <td style="padding:10px 0;border-bottom:1px solid #f3f4f6;color:#374151;font-size:14px;text-align:right">${fmt(p.price)}</td>
+      <td style="padding:10px 0;border-bottom:1px solid #f3f4f6;color:#111827;font-size:14px;text-align:right;font-weight:600">${fmt(p.quantity * p.price)}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+    <title>New Sale</title></head>
+    <body style="margin:0;padding:0;background:#f4f4f5;font-family:Arial,sans-serif">
+      <div style="max-width:560px;margin:40px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)">
+
+        <!-- Header -->
+        <div style="background:linear-gradient(135deg,#16a34a 0%,#064e3b 100%);padding:32px 40px">
+          <div style="font-size:32px;margin-bottom:8px">💰</div>
+          <h1 style="margin:0;color:#fff;font-size:22px">New Sale!</h1>
+          <p style="margin:6px 0 0;color:#bbf7d0;font-size:14px">${businessName}</p>
+        </div>
+
+        <!-- Body -->
+        <div style="padding:32px 40px">
+          <p style="color:#374151;font-size:15px;margin:0 0 8px">Hi <strong>${ownerName}</strong>,</p>
+          <p style="color:#374151;font-size:15px;margin:0 0 24px">
+            You just made a sale! <strong>${customerName}</strong> completed a payment on your store.
+          </p>
+
+          <!-- Amount highlight -->
+          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:20px 24px;text-align:center;margin-bottom:28px">
+            <p style="margin:0 0 4px;color:#166534;font-size:13px;text-transform:uppercase;letter-spacing:.5px;font-weight:700">Amount Received</p>
+            <p style="margin:0;color:#15803d;font-size:36px;font-weight:800">${fmt(totalAmount)}</p>
+          </div>
+
+          <!-- Products table -->
+          <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
+            <thead>
+              <tr>
+                <th style="text-align:left;font-size:12px;color:#6b7280;text-transform:uppercase;padding-bottom:8px;border-bottom:2px solid #f3f4f6">Item</th>
+                <th style="text-align:center;font-size:12px;color:#6b7280;text-transform:uppercase;padding-bottom:8px;border-bottom:2px solid #f3f4f6">Qty</th>
+                <th style="text-align:right;font-size:12px;color:#6b7280;text-transform:uppercase;padding-bottom:8px;border-bottom:2px solid #f3f4f6">Unit Price</th>
+                <th style="text-align:right;font-size:12px;color:#6b7280;text-transform:uppercase;padding-bottom:8px;border-bottom:2px solid #f3f4f6">Subtotal</th>
+              </tr>
+            </thead>
+            <tbody>${productRows}</tbody>
+            <tfoot>
+              <tr>
+                <td colspan="3" style="padding-top:12px;font-size:14px;font-weight:700;color:#111827;text-align:right;padding-right:16px">Total</td>
+                <td style="padding-top:12px;font-size:16px;font-weight:800;color:#15803d;text-align:right">${fmt(totalAmount)}</td>
+              </tr>
+            </tfoot>
+          </table>
+
+          <!-- Meta -->
+          <div style="background:#f9fafb;border-radius:8px;padding:16px 20px">
+            <p style="margin:0 0 8px;font-size:13px;color:#374151"><strong>Customer:</strong> ${customerName}</p>
+            <p style="margin:0 0 8px;font-size:13px;color:#374151"><strong>Reference:</strong> ${paymentReference}</p>
+            <p style="margin:0;font-size:13px;color:#374151"><strong>Paid at:</strong> ${dateStr}</p>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div style="background:#f9fafb;padding:20px 40px;text-align:center;border-top:1px solid #f3f4f6">
+          <p style="color:#9ca3af;font-size:12px;margin:0">© ${new Date().getFullYear()} PayFlex. All rights reserved.</p>
+        </div>
+
+      </div>
+    </body>
+    </html>
+  `;
+}
+
+// ─── Purchase Receipt Template (to customer) ──────────────────────────────────
+
+function purchaseReceiptTemplate(
+  customerName: string,
+  businessName: string,
+  businessEmail: string | undefined,
+  businessPhone: string | undefined,
+  products: Array<{ name: string; quantity: number; price: number }>,
+  totalAmount: number,
+  paymentReference: string,
+  paidAt: Date
+): string {
+  const fmt = (n: number) => `₦${n.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+  const dateStr = new Date(paidAt).toLocaleString('en-NG', {
+    dateStyle: 'long', timeStyle: 'short', timeZone: 'Africa/Lagos',
+  });
+
+  const productRows = products.map(p => `
+    <tr>
+      <td style="padding:12px 0;border-bottom:1px solid #f3f4f6;color:#374151;font-size:14px">${p.name}</td>
+      <td style="padding:12px 0;border-bottom:1px solid #f3f4f6;color:#6b7280;font-size:14px;text-align:center">${p.quantity}</td>
+      <td style="padding:12px 0;border-bottom:1px solid #f3f4f6;color:#374151;font-size:14px;text-align:right">${fmt(p.price)}</td>
+      <td style="padding:12px 0;border-bottom:1px solid #f3f4f6;color:#111827;font-size:14px;text-align:right;font-weight:600">${fmt(p.quantity * p.price)}</td>
+    </tr>
+  `).join('');
+
+  const contactLine = [businessEmail, businessPhone].filter(Boolean).join(' · ');
+
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+    <title>Your Receipt</title></head>
+    <body style="margin:0;padding:0;background:#f4f4f5;font-family:Arial,sans-serif">
+      <div style="max-width:560px;margin:40px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)">
+
+        <!-- Header -->
+        <div style="background:linear-gradient(135deg,#1d4ed8 0%,#0f172a 100%);padding:32px 40px;text-align:center">
+          <div style="font-size:36px;margin-bottom:8px">🧾</div>
+          <h1 style="margin:0;color:#fff;font-size:22px">Payment Receipt</h1>
+          <p style="margin:6px 0 0;color:#bfdbfe;font-size:14px">${businessName}</p>
+        </div>
+
+        <!-- Body -->
+        <div style="padding:32px 40px">
+
+          <p style="color:#374151;font-size:15px;margin:0 0 4px">Hi <strong>${customerName}</strong>,</p>
+          <p style="color:#374151;font-size:15px;margin:0 0 28px">
+            Thank you for your purchase from <strong>${businessName}</strong>. Here is your receipt.
+          </p>
+
+          <!-- Receipt details -->
+          <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:28px">
+
+            <!-- Date + Reference -->
+            <div style="background:#f9fafb;padding:14px 20px;display:flex;justify-content:space-between;border-bottom:1px solid #e5e7eb">
+              <div>
+                <p style="margin:0;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px">Date</p>
+                <p style="margin:4px 0 0;font-size:13px;font-weight:600;color:#111827">${dateStr}</p>
+              </div>
+              <div style="text-align:right">
+                <p style="margin:0;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px">Reference</p>
+                <p style="margin:4px 0 0;font-size:13px;font-weight:600;color:#111827;font-family:monospace">${paymentReference}</p>
+              </div>
+            </div>
+
+            <!-- Products table -->
+            <div style="padding:0 20px">
+              <table style="width:100%;border-collapse:collapse">
+                <thead>
+                  <tr>
+                    <th style="text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase;padding:12px 0 8px;border-bottom:2px solid #f3f4f6">Item</th>
+                    <th style="text-align:center;font-size:11px;color:#6b7280;text-transform:uppercase;padding:12px 0 8px;border-bottom:2px solid #f3f4f6">Qty</th>
+                    <th style="text-align:right;font-size:11px;color:#6b7280;text-transform:uppercase;padding:12px 0 8px;border-bottom:2px solid #f3f4f6">Price</th>
+                    <th style="text-align:right;font-size:11px;color:#6b7280;text-transform:uppercase;padding:12px 0 8px;border-bottom:2px solid #f3f4f6">Total</th>
+                  </tr>
+                </thead>
+                <tbody>${productRows}</tbody>
+              </table>
+            </div>
+
+            <!-- Total -->
+            <div style="background:#1d4ed8;padding:16px 20px;display:flex;justify-content:space-between;align-items:center">
+              <span style="color:#bfdbfe;font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">Total Paid</span>
+              <span style="color:#fff;font-size:22px;font-weight:800">${fmt(totalAmount)}</span>
+            </div>
+          </div>
+
+          <!-- Status badge -->
+          <div style="text-align:center;margin-bottom:28px">
+            <span style="display:inline-block;background:#dcfce7;color:#15803d;font-size:13px;font-weight:700;padding:8px 20px;border-radius:50px;letter-spacing:.5px">
+              ✅ PAYMENT CONFIRMED
+            </span>
+          </div>
+
+          <!-- Business contact -->
+          ${contactLine ? `
+          <div style="border-top:1px solid #f3f4f6;padding-top:20px;text-align:center">
+            <p style="margin:0;font-size:13px;color:#6b7280">Questions? Contact <strong>${businessName}</strong></p>
+            <p style="margin:6px 0 0;font-size:13px;color:#1d4ed8">${contactLine}</p>
+          </div>` : ''}
+
+        </div>
+
+        <!-- Footer -->
+        <div style="background:#f9fafb;padding:20px 40px;text-align:center;border-top:1px solid #f3f4f6">
+          <p style="color:#9ca3af;font-size:12px;margin:0">
+            This is an automated receipt. Please keep it for your records.<br/>
+            © ${new Date().getFullYear()} PayFlex. All rights reserved.
+          </p>
+        </div>
+
+      </div>
+    </body>
+    </html>
+  `;
+}
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 class EmailService {
@@ -305,6 +538,31 @@ class EmailService {
       html:    saleskeeperInviteTemplate(name, businessName, to, tempPassword),
     });
   }
+
+  async sendSaleNotification({
+    to, ownerName, businessName, customerName,
+    products, totalAmount, paymentReference, paidAt,
+  }: SendSaleNotificationOptions): Promise<void> {
+    await resend.emails.send({
+      from:    FROM_ADDRESS,
+      to,
+      subject: `💰 New sale — ${customerName} paid ₦${totalAmount.toLocaleString('en-NG')}`,
+      html:    saleNotificationTemplate(ownerName, businessName, customerName, products, totalAmount, paymentReference, paidAt),
+    });
+  }
+
+  async sendPurchaseReceipt({
+    to, customerName, businessName, businessEmail, businessPhone,
+    products, totalAmount, paymentReference, paidAt,
+  }: SendPurchaseReceiptOptions): Promise<void> {
+    await resend.emails.send({
+      from:    FROM_ADDRESS,
+      to,
+      subject: `Your receipt from ${businessName} — ₦${totalAmount.toLocaleString('en-NG')}`,
+      html:    purchaseReceiptTemplate(customerName, businessName, businessEmail, businessPhone, products, totalAmount, paymentReference, paidAt),
+    });
+  }
+
 
 }
 

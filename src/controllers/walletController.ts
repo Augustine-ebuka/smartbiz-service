@@ -9,6 +9,7 @@ import { Income } from '../models/income.model';
 import { Customer } from '../models/customer.model';
 import inventoryService from '../services/inventory.service';
 import {Product} from '../models/product.model';
+import emailService from '../services/EmailService';
 /**
  * POST /reserved-accounts
  * Creates a dedicated virtual account for a customer.
@@ -438,8 +439,61 @@ export const handleMonnifyWebhook = async (req: Request, res: Response): Promise
                   );
                   console.log({isLowStock, stockAfter});
           }
+          // After your for loop that creates income records — add this:
+
+        // Fetch owner details for the emails
+        const owner    = await User.findById(transaction.user_id).select('firstName email settings');
+        const customer = await Customer.findById(transaction.customer_id).select('name email');
+
+        const businessName  = owner?.settings?.companyProfile?.businessName ?? 'Your Business';
+        const businessEmail = owner?.settings?.companyProfile?.contact?.email;
+        const businessPhone = owner?.settings?.companyProfile?.contact?.phone;
+
+        // Build product list for email (from transaction.products)
+        const emailProducts = transaction.products.map((p: any) => ({
+          name:     p.name     ?? 'Product',
+          quantity: p.quantity ?? 1,
+          price:    p.price    ?? 0,
+        }));
+
+        const paidAt = new Date();
+
+        // 1 — Notify the business owner
+        if (owner?.email) {
+          emailService.sendSaleNotification({
+            to:               owner.email,
+            ownerName:        owner.firstName,
+            businessName,
+            customerName:     customer?.name ?? eventData.customerName,
+            products:         emailProducts,
+            totalAmount:      amountPaid,
+            paymentReference: paymentReference,
+            paidAt,
+          }).catch(err => console.error('[Email] Sale notification failed:', err));
+        }
+
+        // 2 — Send receipt to the customer
+        const customerEmail = customer?.email ?? eventData.customerEmail;
+        if (customerEmail) {
+          emailService.sendPurchaseReceipt({
+            to:               customerEmail,
+            customerName:     customer?.name ?? eventData.customerName,
+            businessName,
+            businessEmail,
+            businessPhone,
+            products:         emailProducts,
+            totalAmount:      amountPaid,
+            paymentReference: paymentReference,
+            paidAt,
+          }).catch(err => console.error('[Email] Purchase receipt failed:', err));
+        }
+
+
         console.log(`Payment confirmed for reference: ${paymentReference}, Amount: ${amountPaid}`);
       }
+
+      // After your for loop that creates income records — add this:
+
     }
 
     // Always respond with 200 OK so Monnify knows you received the webhook
