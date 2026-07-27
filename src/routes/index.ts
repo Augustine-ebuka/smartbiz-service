@@ -17,6 +17,8 @@ import inventoryRoute from './inventory.routes';
 import activityLog from './activityLog.route'
 import debtRecordRoute from './debtrecord.route';
 import bulkUploadRoute from './bulkupload.route';
+import ocrRoute from './ocr.route';
+import aiRoute from './ai.route';
 
 
 
@@ -36,6 +38,8 @@ router.use("/v1/inventory", inventoryRoute);
 router.use("/v1/activity-log", activityLog);
 router.use("/v1/debt-records", debtRecordRoute);
 router.use("/v1/bulk-upload", bulkUploadRoute);
+router.use("/v1/ocr", ocrRoute);
+router.use("/v1/ai", aiRoute);
 
 
 

@@ -5,7 +5,6 @@ import dotenv from 'dotenv';
 const envPath = path.resolve(__dirname, '..', '.env');
 dotenv.config({ path: envPath });
 dotenv.config();
-
 import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
