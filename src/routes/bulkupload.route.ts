@@ -12,6 +12,7 @@ router.use(authenticateToken, resolveBusinessOwner);
 
 router.get('/template/income',   BulkImportController.downloadIncomeTemplate);
 router.get('/template/expense',  BulkImportController.downloadExpenseTemplate);
+router.get('/template/customers',  BulkImportController.downloadCustomerTemplate);
 
 // ── Bulk imports ───────────────────────────────────────────────────────────────
 // POST /api/bulk/import/income     → upload filled income sheet
@@ -19,5 +20,6 @@ router.get('/template/expense',  BulkImportController.downloadExpenseTemplate);
 
 router.post('/import/income',  uploadExcel, BulkImportController.importIncome);
 router.post('/import/expense', uploadExcel, BulkImportController.importExpense);
+router.post('/import/customers', uploadExcel, BulkImportController.importCustomers);
 
 export default router;

@@ -6,7 +6,6 @@ import { Customer } from '../models/customer.model';
 import { Income } from '../models/income.model';
 import { Expense } from '../models/expense.model';
 import { ExpenseCategory } from '../models/expenseCategory.model';
-
 // ─── Multer — memory storage (no disk write) ──────────────────────────────────
 
 export const uploadExcel = multer({
@@ -322,6 +321,161 @@ class BulkImportController {
           imported: inserted,
           failed:   errorRows.length,
           errors:   errorRows,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+// ADD THESE TWO METHODS inside the BulkImportController class
+// ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * GET /api/bulk/template/customers
+   * Returns a downloadable Excel template for customer bulk upload
+   */
+  async downloadCustomerTemplate(req: Request, res: Response, next: NextFunction) {
+    try {
+      const wb = XLSX.utils.book_new();
+
+      // ── Main import sheet ──────────────────────────────────────────────────
+      const customerData = [
+        // Headers
+        ['name', 'email', 'phone', 'address', 'notes'],
+        // Sample rows
+        ['Emeka Nwosu',   'emeka@gmail.com',    '+2348031234567', '14 Allen Avenue, Ikeja, Lagos',  'VIP customer'],
+        ['Chidinma Obi',  'chidinma@yahoo.com', '+2348056789012', '22 Aba Road, Port Harcourt',     ''],
+        ['Tunde Fashola', '',                   '+2348099990000', '',                                'Prefers cash'],
+      ];
+
+      const sheet = XLSX.utils.aoa_to_sheet(customerData);
+
+      // Column widths
+      sheet['!cols'] = [
+        { wch: 25 },  // name
+        { wch: 30 },  // email
+        { wch: 18 },  // phone
+        { wch: 40 },  // address
+        { wch: 30 },  // notes
+      ];
+
+      XLSX.utils.book_append_sheet(wb, sheet, 'Customer Import');
+
+      // ── Instructions sheet ─────────────────────────────────────────────────
+      const instructions = [
+        ['INSTRUCTIONS'],
+        [''],
+        ['1. Fill in the "Customer Import" sheet with your customer data'],
+        ['2. Only "name" is required — all other fields are optional'],
+        ['3. Delete the 3 sample rows before uploading'],
+        ['4. Do not change or delete the header row'],
+        ['5. Duplicate emails will be skipped automatically'],
+        ['6. Save as .xlsx before uploading'],
+      ];
+      const instrSheet = XLSX.utils.aoa_to_sheet(instructions);
+      instrSheet['!cols'] = [{ wch: 55 }];
+      XLSX.utils.book_append_sheet(wb, instrSheet, 'Instructions');
+
+      const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+      res.setHeader('Content-Disposition', 'attachment; filename="customer_import_template.xlsx"');
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.send(buffer);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /api/bulk/import/customers
+   * Multipart — field: "file" (.xlsx)
+   */
+  async importCustomers(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.file) {
+        res.status(400).json({ success: false, message: 'No file uploaded.' });
+        return;
+      }
+
+      const userId = (req as any).businessOwnerId as string || '';
+
+      const wb    = XLSX.read(req.file.buffer, { type: 'buffer' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows  = XLSX.utils.sheet_to_json<any>(sheet, { defval: '' });
+
+      if (rows.length === 0) {
+        res.status(400).json({ success: false, message: 'The sheet is empty.' });
+        return;
+      }
+
+      // Pre-fetch existing emails for this user to skip duplicates
+      const existingCustomers = await Customer.find({ userId }).select('email phone').lean();
+      const existingEmails    = new Set(existingCustomers.map(c => c.email?.toLowerCase()).filter(Boolean));
+      const existingPhones    = new Set(existingCustomers.map(c => c.phone?.trim()).filter(Boolean));
+
+      const validRows:    any[]                                  = [];
+      const errorRows:    { row: number; error: string }[]       = [];
+      const skippedRows:  { row: number; reason: string }[]      = [];
+
+      rows.forEach((row: any, index: number) => {
+        const rowNum = index + 2;  // +2 because row 1 is headers
+
+        const name = String(row['name'] ?? '').trim();
+        if (!name) {
+          errorRows.push({ row: rowNum, error: 'name is required.' });
+          return;
+        }
+
+        const email = String(row['email'] ?? '').trim().toLowerCase() || undefined;
+        const phone = String(row['phone'] ?? '').trim() || undefined;
+
+        // Skip duplicate emails
+        if (email && existingEmails.has(email)) {
+          skippedRows.push({ row: rowNum, reason: `Customer with email "${email}" already exists.` });
+          return;
+        }
+
+        // Skip duplicate phones
+        if (phone && existingPhones.has(phone)) {
+          skippedRows.push({ row: rowNum, reason: `Customer with phone "${phone}" already exists.` });
+          return;
+        }
+
+        // Track within this batch to catch duplicates in the same sheet
+        if (email) existingEmails.add(email);
+        if (phone) existingPhones.add(phone);
+
+        validRows.push({
+          userId,
+          name,
+          email,
+          phone,
+          address: String(row['address'] ?? '').trim() || undefined,
+          notes:   String(row['notes']   ?? '').trim() || undefined,
+        });
+      });
+
+      let inserted = 0;
+      if (validRows.length > 0) {
+        await Customer.insertMany(validRows, { ordered: false });
+        inserted = validRows.length;
+      }
+
+      res.status(200).json({
+        success: true,
+        message: `Import complete. ${inserted} customers imported${
+          errorRows.length   > 0 ? `, ${errorRows.length} rows had errors`     : ''
+        }${
+          skippedRows.length > 0 ? `, ${skippedRows.length} duplicates skipped` : ''
+        }.`,
+        data: {
+          imported: inserted,
+          failed:   errorRows.length,
+          skipped:  skippedRows.length,
+          errors:   errorRows,
+          skippedDetails: skippedRows,
         },
       });
     } catch (error) {
