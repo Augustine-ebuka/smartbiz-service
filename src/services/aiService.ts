@@ -26,15 +26,22 @@ const cfoAlertSchema: Schema = {
     executiveSummary: { 
       type: Type.STRING, 
       description: "A concise 3-sentence summary of the business's current financial standing." 
+    },
+    stockHistory: { 
+      type: Type.ARRAY, 
+      items: { type: Type.OBJECT }, 
+      description: "Detailed stock history or inventory data for the business, including date, quantity,product name, and price." 
     }
   },
-  required: ["healthScore", "criticalAlerts", "growthOpportunities", "executiveSummary"]
+  required: ["healthScore", "criticalAlerts", "growthOpportunities", "executiveSummary", "stockHistory"]
 };
 
 // --- SYSTEM INSTRUCTIONS ---
 const SYSTEM_CORE_CONTEXT = `You are a world-class Virtual CFO and automated business data analyst. 
 You are given a highly detailed JSON report containing Profit & Loss, Cash Flow, Expense reports, Revenue insights, Top Products, Top Customers, and Growth Metrics.
-Your job is to analyze this data deeply, find hidden correlations (e.g., comparing product transaction frequency to revenue yield, or tracking runway drops), and provide strategic advice.`;
+Your job is to analyze this data deeply, find hidden correlations (e.g., comparing product transaction frequency to revenue yield, or tracking runway drops), and provide strategic advice. 
+Include stock history data in your analysis.`
+;
 
 
 /**

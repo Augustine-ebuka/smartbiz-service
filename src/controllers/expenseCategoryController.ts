@@ -71,6 +71,7 @@ class ExpenseCategoryController {
       next(error);
     }
   }
+  
 
 }
 

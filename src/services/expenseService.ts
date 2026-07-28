@@ -17,14 +17,28 @@ class ExpenseCategoryService {
       userId,
       name: { $regex: new RegExp(`^${payload.name}$`, 'i') },   // case-insensitive dupe check
     });
+    console.log(existing)
     if (existing) throw new Error(`Category "${payload.name}" already exists.`);
 
     const category = new ExpenseCategory({ userId, ...payload });
     return category.save();
   }
 
+  // bulk create expense categories
+  async bulkCreate(userId: string, payloads: CreateExpenseCategoryDTO[]): Promise<IExpenseCategory[]> {
+    const categories = await Promise.all(
+      payloads.map(async (payload) => {
+        return await this.create(userId, payload);
+      })
+    );
+    return categories;
+  }
+
   async getAll(userId: string): Promise<IExpenseCategory[]> {
-    return ExpenseCategory.find({ userId }).sort({ name: 1 });
+    // combine system categories with user categories sorted by name
+    const systemCategories = await this.getSystemCategories(userId);
+    const userCategories = await ExpenseCategory.find({ userId }).sort({ name: 1 });
+    return [...systemCategories, ...userCategories];
   }
 
   async getById(userId: string, categoryId: string): Promise<IExpenseCategory> {
@@ -52,7 +66,12 @@ class ExpenseCategoryService {
     return category;
   }
 
-  async delete(userId: string, categoryId: string): Promise<void> {
+  // get system expense categories
+  async getSystemCategories(userId: string): Promise<IExpenseCategory[]> {
+    return ExpenseCategory.find({ system: true });
+  }
+
+   async delete(userId: string, categoryId: string): Promise<void> {
     const result = await ExpenseCategory.findOneAndDelete({ _id: categoryId, userId });
     if (!result) throw new Error('Expense category not found.');
   }

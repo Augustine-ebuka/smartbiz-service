@@ -55,7 +55,7 @@ class ExpenseService {
   async create(userId: string, payload: CreateExpenseDTO): Promise<IExpense> {
     // Validate categoryId belongs to this user if provided
     if (payload.categoryId) {
-      const category = await ExpenseCategory.findOne({ _id: payload.categoryId, userId });
+      const category = await ExpenseCategory.findOne({ _id: payload.categoryId });
       if (!category) throw new Error('Expense category not found.');
     }
 

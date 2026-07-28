@@ -8,6 +8,7 @@ export interface IExpenseCategory extends Document {
   name: string;
   createdAt: Date;
   updatedAt: Date;
+  system: boolean;
 }
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
@@ -16,6 +17,7 @@ const ExpenseCategorySchema = new Schema<IExpenseCategory>(
   {
     userId: { type: String, required: true, index: true },
     name:   { type: String, required: true, trim: true },
+    system: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

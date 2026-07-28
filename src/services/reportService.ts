@@ -1,5 +1,6 @@
 import { Expense } from '../models/expense.model';
 import { Income } from '../models/income.model';
+import { StockHistory,IStockHistory } from '../models/stockHistory.model';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -70,6 +71,8 @@ export interface ReportsData {
     profitGrowth: number | null;        // % change vs previous period
     transactionGrowth: number | null;   // % change vs previous period
   };
+
+  stockHistory: IStockHistory[];
 
   summary: {
     periodDays: number;
@@ -195,6 +198,8 @@ class ReportsService {
 
       // Total transaction count current period
       transactionCount,
+
+      stockHistory,
     ] = await Promise.all([
 
       // ── Current period revenue ─────────────────────────────────────────────
@@ -353,7 +358,15 @@ class ReportsService {
 
       // ── Total income transactions current period ───────────────────────────
       Income.countDocuments({ userId, date: { $gte: start, $lte: end } }),
-    ]);
+
+
+      // To this:
+      StockHistory.find({ userId, createdAt: { $gte: start, $lte: end } })
+        .sort({ createdAt: -1 })
+        .populate('productId')
+        .select('-__v -createdAt -updatedAt')
+        .lean(),
+          ]);
 
     // ── Compute base values ───────────────────────────────────────────────────
 
@@ -419,6 +432,8 @@ class ReportsService {
       ? incomeByPaymentMethod[0]._id ?? 'Unknown'
       : 'None';
 
+
+
     return {
       range: label,
 
@@ -464,6 +479,8 @@ class ReportsService {
         profitGrowth:      growthRate(netProfit,      prevProfit),
         transactionGrowth: growthRate(transactionCount, prevTxCount),
       },
+
+      stockHistory, 
 
       summary: {
         periodDays:             days,
