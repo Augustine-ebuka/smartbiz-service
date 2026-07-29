@@ -19,6 +19,7 @@ import debtRecordRoute from './debtrecord.route';
 import bulkUploadRoute from './bulkupload.route';
 import ocrRoute from './ocr.route';
 import aiRoute from './ai.route';
+import aiChatEntryRoute from './aichatEntry.route';
 
 
 
@@ -40,6 +41,7 @@ router.use("/v1/debt-records", debtRecordRoute);
 router.use("/v1/bulk-upload", bulkUploadRoute);
 router.use("/v1/ocr", ocrRoute);
 router.use("/v1/ai", aiRoute);
+router.use("/v1/ai", aiChatEntryRoute);
 
 
 
