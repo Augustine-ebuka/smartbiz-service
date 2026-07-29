@@ -97,9 +97,22 @@ async function recordDebt(userId: string, debt: PendingDebtCustomerConfirmation[
   });
 }
 
-// TODAY / THIS_WEEK / THIS_MONTH boundaries as ISO strings for IncomeService/ExpenseService.getSummary.
-// Deliberately duplicated (not imported) from dashboardService's private date helpers.
-function getPeriodRange(period?: string): { startDate?: string; endDate?: string } {
+// TODAY / THIS_WEEK / THIS_MONTH / a specific date boundaries as ISO strings for
+// IncomeService/ExpenseService.getSummary. Deliberately duplicated (not imported)
+// from dashboardService's private date helpers.
+function getPeriodRange(period?: string, date?: string): { startDate?: string; endDate?: string } {
+  // An explicit calendar date (e.g. "yesterday", "July 20") always wins over a
+  // relative period — the AI is told not to set both, but if it does, a specific
+  // day is the more precise signal.
+  if (date) {
+    const [year, month, day] = date.split('-').map(Number);
+    if (year && month && day) {
+      const start = new Date(Date.UTC(year, month - 1, day));
+      const end = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
+      return { startDate: start.toISOString(), endDate: end.toISOString() };
+    }
+  }
+
   const now = new Date();
 
   if (period === 'TODAY') {
@@ -120,6 +133,21 @@ function getPeriodRange(period?: string): { startDate?: string; endDate?: string
   }
 
   return {}; // ALL_TIME — no bounds
+}
+
+// Natural-language lead-in for a CHECK_SUMMARY / CHECK_TOP_PRODUCTS reply, e.g.
+// "On 20 July 2026, ..." / "So far this week, ..." / "Overall, ...".
+function summaryLeadIn(period?: string, date?: string): string {
+  if (date) {
+    const [year, month, day] = date.split('-').map(Number);
+    if (year && month && day) {
+      const formatted = new Date(Date.UTC(year, month - 1, day)).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+      return `On ${formatted},`;
+    }
+  }
+  if (!period || period === 'ALL_TIME') return 'Overall,';
+  const labels: Record<string, string> = { TODAY: 'today', THIS_WEEK: 'this week', THIS_MONTH: 'this month' };
+  return `So far ${labels[period] || 'overall'},`;
 }
 
 router.post('/chat/entry', async (req, res) => {
@@ -213,7 +241,17 @@ router.post('/chat/entry', async (req, res) => {
     // 2. Route the output payload to the real database services
     switch (actionType) {
       case 'ADD_INCOME': {
-        if (!payload.amount) {
+        // No explicit amount stated — if the product is known and priced, derive
+        // it from price × quantity instead of asking. Only do this when the AI
+        // left amount blank (i.e. the user never stated one); never override an
+        // amount the user actually said (covers discounts/negotiated prices).
+        let amount = payload.amount;
+        const priceLookupProduct = !amount ? await findProductByName(userId, payload.productName || payload.category) : null;
+        if (!amount && priceLookupProduct) {
+          amount = priceLookupProduct.price * (payload.quantity ?? 1);
+        }
+
+        if (!amount) {
           askForMore(replyToUser || 'How much was the sale for?');
           return;
         }
@@ -229,7 +267,7 @@ router.post('/chat/entry', async (req, res) => {
             context: 'income',
             customerName: payload.customerName,
             income: {
-              amount: payload.amount,
+              amount,
               productName: payload.productName,
               category: payload.category,
               quantity: payload.quantity,
@@ -243,7 +281,7 @@ router.post('/chat/entry', async (req, res) => {
         }
 
         const income = await recordIncome(userId, {
-          amount: payload.amount,
+          amount,
           productName: payload.productName,
           category: payload.category,
           quantity: payload.quantity,
@@ -417,22 +455,96 @@ router.post('/chat/entry', async (req, res) => {
       }
 
       case 'CHECK_SUMMARY': {
-        const { startDate, endDate } = getPeriodRange(payload.period);
+        const { startDate, endDate } = getPeriodRange(payload.period, payload.date);
         const [incomeSummary, expenseSummary] = await Promise.all([
           IncomeService.getSummary(userId, startDate, endDate),
           ExpenseService.getSummary(userId, startDate, endDate),
         ]);
         const profit = incomeSummary.total - expenseSummary.total;
-        const periodLabel: Record<string, string> = { TODAY: 'today', THIS_WEEK: 'this week', THIS_MONTH: 'this month', ALL_TIME: 'overall' };
-        const label = periodLabel[payload.period] || 'overall';
-        const reply = `${label === 'overall' ? 'Overall' : `So far ${label}`}, you've made ₦${incomeSummary.total.toLocaleString()} and spent ₦${expenseSummary.total.toLocaleString()}, for a profit of ₦${profit.toLocaleString()}.`;
+        const leadIn = summaryLeadIn(payload.period, payload.date);
+        const reply = `${leadIn} you made ₦${incomeSummary.total.toLocaleString()} and spent ₦${expenseSummary.total.toLocaleString()}, for a profit of ₦${profit.toLocaleString()}.`;
         res.json({
           success: true,
           actionExecuted: actionType,
           reply,
-          data: { period: payload.period || 'ALL_TIME', income: incomeSummary.total, expense: expenseSummary.total, profit },
+          data: { period: payload.date ? undefined : (payload.period || 'ALL_TIME'), date: payload.date, income: incomeSummary.total, expense: expenseSummary.total, profit },
           history: [],
         });
+        return;
+      }
+
+      case 'CHECK_TOP_PRODUCTS': {
+        const { startDate, endDate } = getPeriodRange(payload.period, payload.date);
+        const { byProduct } = await IncomeService.getSummary(userId, startDate, endDate);
+        const ranked = byProduct.filter((p: any) => p.total > 0); // already sorted desc by total
+        const leadIn = summaryLeadIn(payload.period, payload.date);
+        const isWorst = payload.rank === 'WORST';
+
+        if (ranked.length === 0) {
+          res.json({
+            success: true,
+            actionExecuted: actionType,
+            reply: `No sales recorded for that period to rank products by.`,
+            data: [],
+            history: [],
+          });
+          return;
+        }
+
+        const picked = isWorst ? ranked[ranked.length - 1] : ranked[0];
+        const label = isWorst ? 'worst-performing' : 'best-selling';
+        const reply = `${leadIn} your ${label} product is "${picked.productName}" — ₦${picked.total.toLocaleString()} from ${picked.unitsSold} unit${picked.unitsSold === 1 ? '' : 's'} sold.`;
+        res.json({ success: true, actionExecuted: actionType, reply, data: ranked.slice(0, 5), history: [] });
+        return;
+      }
+
+      case 'CHECK_TOP_CUSTOMERS': {
+        const { startDate, endDate } = getPeriodRange(payload.period, payload.date);
+        const { byCustomer } = await IncomeService.getSummary(userId, startDate, endDate);
+        const ranked = byCustomer.filter((c: any) => c.total > 0 && c.customerName !== 'Walk-in / No customer'); // already sorted desc by total
+        const leadIn = summaryLeadIn(payload.period, payload.date);
+        const isWorst = payload.rank === 'WORST';
+
+        if (ranked.length === 0) {
+          res.json({
+            success: true,
+            actionExecuted: actionType,
+            reply: `No customer-attributed sales recorded for that period to rank by.`,
+            data: [],
+            history: [],
+          });
+          return;
+        }
+
+        const picked = isWorst ? ranked[ranked.length - 1] : ranked[0];
+        const label = isWorst ? 'lowest-spending' : 'top-spending';
+        const reply = `${leadIn} your ${label} customer is "${picked.customerName}" — ₦${picked.total.toLocaleString()} across ${picked.count} purchase${picked.count === 1 ? '' : 's'}.`;
+        res.json({ success: true, actionExecuted: actionType, reply, data: ranked.slice(0, 5), history: [] });
+        return;
+      }
+
+      case 'CHECK_PAYMENT_METHODS': {
+        const { startDate, endDate } = getPeriodRange(payload.period, payload.date);
+        const { byPaymentMethod } = await IncomeService.getSummary(userId, startDate, endDate);
+        const leadIn = summaryLeadIn(payload.period, payload.date);
+
+        if (payload.paymentMethod && payload.paymentMethod !== 'Unknown') {
+          const match = byPaymentMethod.find((m: any) => m._id?.toLowerCase() === payload.paymentMethod.toLowerCase());
+          const reply = match
+            ? `${leadIn} ${match.count} sale${match.count === 1 ? '' : 's'} were paid via ${payload.paymentMethod}, totaling ₦${match.total.toLocaleString()}.`
+            : `${leadIn} no sales were paid via ${payload.paymentMethod}.`;
+          res.json({ success: true, actionExecuted: actionType, reply, data: match || { _id: payload.paymentMethod, total: 0, count: 0 }, history: [] });
+          return;
+        }
+
+        if (byPaymentMethod.length === 0) {
+          res.json({ success: true, actionExecuted: actionType, reply: `No sales recorded for that period.`, data: [], history: [] });
+          return;
+        }
+
+        const breakdown = byPaymentMethod.map((m: any) => `${m._id || 'Unspecified'}: ${m.count} (₦${m.total.toLocaleString()})`).join(', ');
+        const reply = `${leadIn} here's the breakdown — ${breakdown}.`;
+        res.json({ success: true, actionExecuted: actionType, reply, data: byPaymentMethod, history: [] });
         return;
       }
 

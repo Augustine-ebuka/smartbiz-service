@@ -156,7 +156,7 @@ class IncomeService {
       if (endDate)   matchStage.date.$lte = new Date(endDate);
     }
 
-    const [totals, byPaymentMethod, byProduct] = await Promise.all([
+    const [totals, byPaymentMethod, byProduct, byCustomer] = await Promise.all([
       // Total income
       Income.aggregate([
         { $match: matchStage },
@@ -206,6 +206,35 @@ class IncomeService {
         },
         { $sort: { total: -1 } },
       ]),
+
+      // Breakdown by customer
+      Income.aggregate([
+        { $match: matchStage },
+        {
+          $group: {
+            _id: '$customerId',
+            total: { $sum: '$amount' },
+            count: { $sum: 1 },
+          },
+        },
+        {
+          $lookup: {
+            from: 'customers',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'customer',
+          },
+        },
+        { $unwind: { path: '$customer', preserveNullAndEmptyArrays: true } },
+        {
+          $project: {
+            customerName: { $ifNull: ['$customer.name', 'Walk-in / No customer'] },
+            total: 1,
+            count: 1,
+          },
+        },
+        { $sort: { total: -1 } },
+      ]),
     ]);
 
     return {
@@ -213,6 +242,7 @@ class IncomeService {
       count: totals[0]?.count ?? 0,
       byPaymentMethod,
       byProduct,
+      byCustomer,
     };
   }
 
