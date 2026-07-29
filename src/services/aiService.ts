@@ -104,7 +104,7 @@ const transactionActionSchema: Schema = {
   properties: {
     actionType: {
       type: Type.STRING,
-      enum: ["ADD_INCOME", "ADD_EXPENSE", "UPDATE_STOCK", "ADD_DEBT", "UNKNOWN"],
+      enum: ["ADD_INCOME", "ADD_EXPENSE", "UPDATE_STOCK", "ADD_DEBT", "CHECK_STOCK", "CHECK_DEBTS", "MARK_DEBT_PAID", "CHECK_SUMMARY", "UNKNOWN"],
       description: "The matching business database operation type."
     },
     payload: {
@@ -129,7 +129,10 @@ const transactionActionSchema: Schema = {
         // Fields for Debt records only
         debtType: { type: Type.STRING, enum: ["THEY_OWE_ME", "I_OWE_THEM"], description: "THEY_OWE_ME if a customer owes the business (e.g. a credit sale, unpaid balance). I_OWE_THEM if the business owes the customer/supplier money." },
         dueDate: { type: Type.STRING, description: "ISO date (YYYY-MM-DD) the debt is due, only if the user mentions a deadline." },
-        description: { type: Type.STRING, description: "Free-text note describing the debt, if extra detail is given." }
+        description: { type: Type.STRING, description: "Free-text note describing the debt, if extra detail is given." },
+
+        // Field for summary queries only
+        period: { type: Type.STRING, enum: ["TODAY", "THIS_WEEK", "THIS_MONTH", "ALL_TIME"], description: "The time window the user is asking about for a sales/expense/profit summary. Default to ALL_TIME if no period is mentioned." }
       }
     },
     replyToUser: {
@@ -151,7 +154,11 @@ CRITICAL RULES:
 2. If the user mentions buying supplies or paying bills, output ADD_EXPENSE and fill in amount, category, and paymentMethod. If they name who they paid or bought from (a shop, supplier, or person), also fill in vendor.
 3. If the user specifically updates inventory levels (e.g. 'added 10 bags to stock'), output UPDATE_STOCK, set quantity, and set operation to INCREASE.
 4. If the user mentions a sale made "on credit"/"on account"/"will pay later", or otherwise says someone owes them money, or that they owe someone else money, output ADD_DEBT instead of ADD_INCOME or ADD_EXPENSE — no cash has actually changed hands yet. Fill in amount, customerName, and debtType (THEY_OWE_ME if the customer owes the business, I_OWE_THEM if the business owes the customer/supplier). Fill in dueDate and description only if mentioned.
-5. Only output UNKNOWN if, after considering the whole conversation, there is still no transaction of any kind in progress. If a transaction is in progress but a field (amount, product, customer, quantity) is still missing, output the correct actionType anyway with the fields you do have, and ask for the missing one in replyToUser — do NOT output UNKNOWN just because one field is missing.`;
+5. If the user is ASKING a question about current stock/inventory levels (e.g. "how many X do I have left", "what's my stock on Y", "show me my inventory", "what's running low"), output CHECK_STOCK — this is a read-only lookup, not a stock adjustment. Fill in productName only if a specific product was named, otherwise leave it out for a full inventory summary. You do NOT have access to the real stock numbers yourself, so replyToUser must NOT contain a made-up quantity — just acknowledge the question naturally (e.g. "Let me check that for you.").
+6. If the user is ASKING about outstanding debts (e.g. "who owes me money", "what do I owe", "does John still owe me anything"), output CHECK_DEBTS — a read-only lookup. Fill in customerName if a specific person was named. Fill in debtType only if they clearly asked about just one direction (only what's owed TO them = THEY_OWE_ME, or only what THEY owe = I_OWE_THEM); leave debtType blank to check both directions.
+7. If the user says a debt has been settled/paid back (e.g. "John paid me the 5000 he owed", "I paid off what I owed my supplier Ade"), output MARK_DEBT_PAID. Fill in customerName (required — you cannot mark a debt paid without knowing whose), amount if mentioned (helps pick the right debt if there's more than one), and debtType (THEY_OWE_ME if a customer paid the business back, I_OWE_THEM if the business paid off what it owed someone).
+8. If the user asks how much they made, spent, or profited over a period (e.g. "how much did I make today", "what's my profit this month", "how much did I spend this week", "how's business been"), output CHECK_SUMMARY and set period to TODAY, THIS_WEEK, THIS_MONTH, or ALL_TIME based on what they said (default ALL_TIME if no period is mentioned). You do NOT have the real numbers yourself — do not guess a total in replyToUser, just acknowledge the question naturally.
+9. Only output UNKNOWN if, after considering the whole conversation, there is still no transaction or question of any kind in progress. If a transaction is in progress but a field (amount, product, customer, quantity) is still missing, output the correct actionType anyway with the fields you do have, and ask for the missing one in replyToUser — do NOT output UNKNOWN just because one field is missing.`;
 
 export interface ConversationTurn {
   role: 'user' | 'model';

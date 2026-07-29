@@ -8,7 +8,8 @@ import { Customer } from '../models/customer.model';
 import IncomeService from '../services/incomeService';
 import ExpenseService from '../services/expensesService';
 import inventoryService from '../services/inventory.service';
-import { createDebtRecord } from '../services/debtrecordService';
+import { createDebtRecord, markDebtRecordAsPaid } from '../services/debtrecordService';
+import { DebtRecordModel } from '../models/debtrecord';
 
 const router = express.Router();
 
@@ -30,13 +31,43 @@ async function findOrCreateExpenseCategory(userId: string, name?: string) {
   return category._id;
 }
 
+async function findCustomerByName(userId: string, name?: string) {
+  if (!name) return null;
+  return Customer.findOne({ userId, name: { $regex: `^${name}$`, $options: 'i' } });
+}
+
 async function findOrCreateCustomer(userId: string, name?: string) {
   if (!name) return undefined;
-  let customer = await Customer.findOne({ userId, name: { $regex: `^${name}$`, $options: 'i' } });
+  let customer = await findCustomerByName(userId, name);
   if (!customer) {
     customer = await Customer.create({ userId, name });
   }
   return customer._id;
+}
+
+// TODAY / THIS_WEEK / THIS_MONTH boundaries as ISO strings for IncomeService/ExpenseService.getSummary.
+// Deliberately duplicated (not imported) from dashboardService's private date helpers.
+function getPeriodRange(period?: string): { startDate?: string; endDate?: string } {
+  const now = new Date();
+
+  if (period === 'TODAY') {
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
+    return { startDate: start.toISOString(), endDate: end.toISOString() };
+  }
+
+  if (period === 'THIS_WEEK') {
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6));
+    return { startDate: start.toISOString(), endDate: now.toISOString() };
+  }
+
+  if (period === 'THIS_MONTH') {
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
+    return { startDate: start.toISOString(), endDate: end.toISOString() };
+  }
+
+  return {}; // ALL_TIME — no bounds
 }
 
 router.post('/chat/entry', async (req, res) => {
@@ -136,6 +167,120 @@ router.post('/chat/entry', async (req, res) => {
           description: payload.description,
         });
         res.json({ success: true, actionExecuted: actionType, reply: replyToUser, data: debt, history: [] });
+        return;
+      }
+
+      case 'CHECK_STOCK': {
+        if (payload.productName) {
+          const product = await findProductByName(userId, payload.productName);
+          if (!product) {
+            askForMore(`I couldn't find a product called "${payload.productName}" in your inventory.`);
+            return;
+          }
+          const reply = !product.trackStock
+            ? `"${product.name}" doesn't have stock tracking enabled, so there's no stock count for it.`
+            : `You have ${product.stock} "${product.name}" left${product.stock <= product.lowStockThreshold ? ' — running low!' : '.'}`;
+          res.json({
+            success: true,
+            actionExecuted: actionType,
+            reply,
+            data: { name: product.name, stock: product.stock, lowStockThreshold: product.lowStockThreshold, trackStock: product.trackStock },
+            history: [],
+          });
+          return;
+        }
+
+        const inventory = await inventoryService.getInventory(userId);
+        const lowStockCount = inventory.filter((p: any) => p.isLowStock).length;
+        const reply = inventory.length === 0
+          ? "You don't have any products with stock tracking enabled yet."
+          : `You have ${inventory.length} tracked product${inventory.length === 1 ? '' : 's'}${lowStockCount ? `, ${lowStockCount} running low` : ', all healthy'}.`;
+        res.json({ success: true, actionExecuted: actionType, reply, data: inventory, history: [] });
+        return;
+      }
+
+      case 'CHECK_DEBTS': {
+        // Query the model directly (userId-scoped) rather than listDebtRecords(),
+        // which does not filter by business owner — using it here would leak
+        // other businesses' debt records into this endpoint.
+        const query: Record<string, any> = { userId, status: 'PENDING' };
+        if (payload.debtType) query.type = payload.debtType;
+
+        let customer = null;
+        if (payload.customerName) {
+          customer = await findCustomerByName(userId, payload.customerName);
+          if (!customer) {
+            res.json({ reply: `I couldn't find a customer called "${payload.customerName}".`, history: [] });
+            return;
+          }
+          query.customer = customer._id;
+        }
+
+        const debts = await DebtRecordModel.find(query).populate('customer', 'name').sort({ createdAt: -1 });
+        const theyOweMe = debts.filter((d: any) => d.type === 'THEY_OWE_ME').reduce((sum: number, d: any) => sum + d.amount, 0);
+        const iOweThem = debts.filter((d: any) => d.type === 'I_OWE_THEM').reduce((sum: number, d: any) => sum + d.amount, 0);
+
+        let reply: string;
+        if (debts.length === 0) {
+          reply = customer ? `No outstanding debts with ${customer.name}.` : 'You have no outstanding debts either way — clean slate!';
+        } else {
+          const parts: string[] = [];
+          if (theyOweMe) parts.push(`people owe you ₦${theyOweMe.toLocaleString()}`);
+          if (iOweThem) parts.push(`you owe ₦${iOweThem.toLocaleString()}`);
+          reply = (customer ? `${customer.name}: ` : '') + parts.join(', ') + '.';
+        }
+
+        res.json({ success: true, actionExecuted: actionType, reply, data: debts, history: [] });
+        return;
+      }
+
+      case 'MARK_DEBT_PAID': {
+        if (!payload.customerName) {
+          askForMore(replyToUser || 'Whose debt should I mark as paid?');
+          return;
+        }
+        const customer = await findCustomerByName(userId, payload.customerName);
+        if (!customer) {
+          res.json({ reply: `I couldn't find a customer called "${payload.customerName}".`, history: [] });
+          return;
+        }
+
+        const query: Record<string, any> = { userId, customer: customer._id, status: 'PENDING' };
+        if (payload.debtType) query.type = payload.debtType;
+        if (payload.amount) query.amount = payload.amount;
+
+        const matches: any[] = await DebtRecordModel.find(query);
+        if (matches.length === 0) {
+          res.json({ reply: `I couldn't find an outstanding debt for ${payload.customerName}${payload.amount ? ` of ₦${payload.amount}` : ''}.`, history: [] });
+          return;
+        }
+        if (matches.length > 1) {
+          askForMore(`${payload.customerName} has ${matches.length} outstanding debts. Which amount should I mark as paid?`);
+          return;
+        }
+
+        await markDebtRecordAsPaid(matches[0]._id.toString(), userId);
+        res.json({ success: true, actionExecuted: actionType, reply: replyToUser, data: { ...matches[0].toObject(), status: 'PAID' }, history: [] });
+        return;
+      }
+
+      case 'CHECK_SUMMARY': {
+        const { startDate, endDate } = getPeriodRange(payload.period);
+        const [incomeSummary, expenseSummary] = await Promise.all([
+          IncomeService.getSummary(userId, startDate, endDate),
+          ExpenseService.getSummary(userId, startDate, endDate),
+        ]);
+        const profit = incomeSummary.total - expenseSummary.total;
+        const periodLabel: Record<string, string> = { TODAY: 'today', THIS_WEEK: 'this week', THIS_MONTH: 'this month', ALL_TIME: 'overall' };
+        const label = periodLabel[payload.period] || 'overall';
+        const reply = `${label === 'overall' ? 'Overall' : `So far ${label}`}, you've made ₦${incomeSummary.total.toLocaleString()} and spent ₦${expenseSummary.total.toLocaleString()}, for a profit of ₦${profit.toLocaleString()}.`;
+        res.json({
+          success: true,
+          actionExecuted: actionType,
+          reply,
+          data: { period: payload.period || 'ALL_TIME', income: incomeSummary.total, expense: expenseSummary.total, profit },
+          history: [],
+        });
         return;
       }
 
