@@ -36,13 +36,65 @@ async function findCustomerByName(userId: string, name?: string) {
   return Customer.findOne({ userId, name: { $regex: `^${name}$`, $options: 'i' } });
 }
 
-async function findOrCreateCustomer(userId: string, name?: string) {
-  if (!name) return undefined;
-  let customer = await findCustomerByName(userId, name);
-  if (!customer) {
-    customer = await Customer.create({ userId, name });
-  }
-  return customer._id;
+// Held server-side-shaped, client-echoed state for the "new customer?" confirmation.
+// Deliberately NOT resolved via the LLM — a yes/no answer that controls whether we
+// write a new Customer record needs a deterministic read, not a guess.
+interface PendingIncomeCustomerConfirmation {
+  type: 'CREATE_CUSTOMER';
+  context: 'income';
+  customerName: string;
+  income: {
+    amount: number;
+    productName?: string;
+    category?: string;
+    quantity?: number;
+    paymentMethod?: string;
+  };
+}
+
+interface PendingDebtCustomerConfirmation {
+  type: 'CREATE_CUSTOMER';
+  context: 'debt';
+  customerName: string;
+  debt: {
+    amount: number;
+    debtType: 'THEY_OWE_ME' | 'I_OWE_THEM';
+    dueDate?: string;
+    description?: string;
+  };
+}
+
+type PendingCustomerConfirmation = PendingIncomeCustomerConfirmation | PendingDebtCustomerConfirmation;
+
+const YES_RE = /^\s*(y|yes|yeah|yep|yup|sure|ok(ay)?|please|go\s*ahead|create|add)\b/i;
+const NO_RE = /^\s*(n|no|nope|nah|don'?t|do\s*not|skip|cancel|never\s*mind)\b/i;
+
+async function recordIncome(
+  userId: string,
+  income: PendingIncomeCustomerConfirmation['income'],
+  customerId?: string,
+  fallbackNote?: string
+) {
+  const product = await findProductByName(userId, income.productName || income.category);
+  return IncomeService.create(userId, {
+    productId: product?._id?.toString(),
+    customerId,
+    unit: income.quantity ?? 1,
+    amount: income.amount,
+    paymentMethod: income.paymentMethod && income.paymentMethod !== 'Unknown' ? (income.paymentMethod as any) : undefined,
+    note: fallbackNote ?? (!product && income.category ? income.category : undefined),
+  });
+}
+
+async function recordDebt(userId: string, debt: PendingDebtCustomerConfirmation['debt'], customerId: string) {
+  return createDebtRecord({
+    userId,
+    type: debt.debtType,
+    amount: debt.amount,
+    customer: customerId,
+    dueDate: debt.dueDate ? new Date(debt.dueDate) : undefined,
+    description: debt.description,
+  });
 }
 
 // TODAY / THIS_WEEK / THIS_MONTH boundaries as ISO strings for IncomeService/ExpenseService.getSummary.
@@ -93,6 +145,67 @@ router.post('/chat/entry', async (req, res) => {
       res.json({ reply, history });
     };
 
+    // 0. If we're mid-way through a "create this customer?" confirmation, resolve
+    // the yes/no answer ourselves and finish the transaction — skip the AI entirely
+    // so a misread reply can never accidentally create/skip a customer.
+    const pending = req.body.pendingConfirmation as PendingCustomerConfirmation | undefined;
+    if (pending?.type === 'CREATE_CUSTOMER') {
+      const isYes = YES_RE.test(message);
+      const isNo = NO_RE.test(message);
+
+      if (!isYes && !isNo) {
+        const reply = `Sorry, just to confirm — should I add "${pending.customerName}" as a new customer? (yes/no)`;
+        const history: ConversationTurn[] = [...incomingHistory, { role: 'user', text: message }, { role: 'model', text: reply }];
+        res.json({ reply, history, pendingConfirmation: pending });
+        return;
+      }
+
+      if (pending.context === 'income') {
+        if (isYes) {
+          const customer = await Customer.create({ userId, name: pending.customerName });
+          const income = await recordIncome(userId, pending.income, customer._id.toString());
+          res.json({
+            success: true,
+            actionExecuted: 'ADD_INCOME',
+            reply: `Got it — added "${pending.customerName}" as a new customer and logged the sale.`,
+            data: income,
+            history: [],
+          });
+          return;
+        }
+
+        const income = await recordIncome(userId, pending.income, undefined, `Customer: ${pending.customerName}`);
+        res.json({
+          success: true,
+          actionExecuted: 'ADD_INCOME',
+          reply: `No problem — logged the sale without creating a customer profile.`,
+          data: income,
+          history: [],
+        });
+        return;
+      }
+
+      // context === 'debt' — a debt record MUST reference a customer, so declining
+      // to create one can't fall through to "record it anyway" like income does.
+      if (isYes) {
+        const customer = await Customer.create({ userId, name: pending.customerName });
+        const debt = await recordDebt(userId, pending.debt, customer._id.toString());
+        res.json({
+          success: true,
+          actionExecuted: 'ADD_DEBT',
+          reply: `Got it — added "${pending.customerName}" as a new customer and logged the debt.`,
+          data: debt,
+          history: [],
+        });
+        return;
+      }
+
+      const reply = `A debt has to be linked to a customer, so I can't log it without one. Want to give a different name, or should I cancel this entry?`;
+      const history: ConversationTurn[] = [...incomingHistory, { role: 'user', text: message }, { role: 'model', text: reply }];
+      res.json({ reply, history });
+      return;
+    }
+
     // 1. Pass the user text + conversation so far through Gemini
     const aiResult = await parseConversationalEntry(message, incomingHistory);
     const { actionType, payload, replyToUser } = aiResult;
@@ -104,16 +217,38 @@ router.post('/chat/entry', async (req, res) => {
           askForMore(replyToUser || 'How much was the sale for?');
           return;
         }
-        const product = await findProductByName(userId, payload.productName || payload.category);
-        const customerId = await findOrCreateCustomer(userId, payload.customerName);
-        const income = await IncomeService.create(userId, {
-          productId: product?._id?.toString(),
-          customerId: customerId?.toString(),
-          unit: payload.quantity ?? 1,
+        if (!payload.customerName) {
+          askForMore(replyToUser || 'Who is this sale for? What is the customer\'s name?');
+          return;
+        }
+
+        const existingCustomer = await findCustomerByName(userId, payload.customerName);
+        if (!existingCustomer) {
+          const pendingConfirmation: PendingCustomerConfirmation = {
+            type: 'CREATE_CUSTOMER',
+            context: 'income',
+            customerName: payload.customerName,
+            income: {
+              amount: payload.amount,
+              productName: payload.productName,
+              category: payload.category,
+              quantity: payload.quantity,
+              paymentMethod: payload.paymentMethod,
+            },
+          };
+          const reply = `I don't have a customer named "${payload.customerName}" yet — want me to add them as a new customer? (yes/no)`;
+          const history: ConversationTurn[] = [...incomingHistory, { role: 'user', text: message }, { role: 'model', text: reply }];
+          res.json({ reply, history, pendingConfirmation });
+          return;
+        }
+
+        const income = await recordIncome(userId, {
           amount: payload.amount,
-          paymentMethod: payload.paymentMethod && payload.paymentMethod !== 'Unknown' ? payload.paymentMethod : undefined,
-          note: !product && payload.category ? payload.category : undefined,
-        });
+          productName: payload.productName,
+          category: payload.category,
+          quantity: payload.quantity,
+          paymentMethod: payload.paymentMethod,
+        }, existingCustomer._id.toString());
         res.json({ success: true, actionExecuted: actionType, reply: replyToUser, data: income, history: [] });
         return;
       }
@@ -157,15 +292,32 @@ router.post('/chat/entry', async (req, res) => {
           askForMore(replyToUser || "Who is this debt with, how much is it, and do they owe you or do you owe them?");
           return;
         }
-        const customerId = await findOrCreateCustomer(userId, payload.customerName);
-        const debt = await createDebtRecord({
-          userId,
-          type: payload.debtType,
+
+        const existingCustomer = await findCustomerByName(userId, payload.customerName);
+        if (!existingCustomer) {
+          const pendingConfirmation: PendingCustomerConfirmation = {
+            type: 'CREATE_CUSTOMER',
+            context: 'debt',
+            customerName: payload.customerName,
+            debt: {
+              amount: payload.amount,
+              debtType: payload.debtType,
+              dueDate: payload.dueDate,
+              description: payload.description,
+            },
+          };
+          const reply = `I don't have a customer named "${payload.customerName}" yet — want me to add them as a new customer? (yes/no)`;
+          const history: ConversationTurn[] = [...incomingHistory, { role: 'user', text: message }, { role: 'model', text: reply }];
+          res.json({ reply, history, pendingConfirmation });
+          return;
+        }
+
+        const debt = await recordDebt(userId, {
           amount: payload.amount,
-          customer: customerId!.toString(),
-          dueDate: payload.dueDate ? new Date(payload.dueDate) : undefined,
+          debtType: payload.debtType,
+          dueDate: payload.dueDate,
           description: payload.description,
-        });
+        }, existingCustomer._id.toString());
         res.json({ success: true, actionExecuted: actionType, reply: replyToUser, data: debt, history: [] });
         return;
       }
