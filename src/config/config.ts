@@ -6,6 +6,10 @@ export const IS_PRODUCTION = ENVIRONMENT === "production";
 export const IS_TEST = ENVIRONMENT === "test";
 export const APP_URL = process.env.APP_URL;
 export const APP_FRONTEND = process.env.APP_FRONTEND;
+// Single canonical frontend URL for building redirect links (e.g. Monnify checkout
+// redirectUrl). APP_FRONTEND above is a comma-separated CORS allow-list, not a URL —
+// keep this one separate so nothing accidentally concatenates onto the whole list.
+export const APP_FRONTEND_URL = process.env.APP_FRONTEND_URL || 'http://localhost:8080';
 export const APP_PORT = Number(process.env.APP_PORT) || 5030;
 export const APP_PREFIX_PATH = process.env.APP_PREFIX_PATH || "/";
 export const MONGODB_URI = process.env.MONGODB_URI || process.env.DB_URI;

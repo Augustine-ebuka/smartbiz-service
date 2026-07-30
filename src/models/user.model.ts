@@ -41,6 +41,23 @@ export interface ICompanyProfile {
   merchantStatus?: boolean;
 }
 
+export type SubscriptionStatus = 'active' | 'expired' | 'cancelled';
+export type PlanId = 'free' | 'monthly' | 'yearly';
+ 
+export interface ISubscription {
+  plan:               PlanId;
+  status:             SubscriptionStatus;
+  startDate?:         Date;
+  endDate?:           Date;              // null for free plan
+  aiQueriesUsedToday: number;
+  lastAiQueryDate?:   Date;             // used to reset counter daily
+}
+ 
+export interface ISettings {
+  companyProfile?: ICompanyProfile;
+  appPreferences?: IAppPreferences;
+}
+
 export interface IAppPreferences {
   theme?: 'light' | 'dark' | 'system';
   language?: string;         // e.g. "en", "fr"
@@ -83,6 +100,7 @@ export interface IUser extends Document {
   otp?: string;              // hashed OTP stored in DB
   otpExpiresAt?: Date;       // expiry timestamp
   settings?: ISettings;
+  subscription?: ISubscription;
   ownerId?: string;          // set for saleskeepers — points to the business owner's userId
   avatarUrl?: string;        // user profile avatar
   comparePassword(candidatePassword: string): Promise<boolean>;
@@ -141,6 +159,19 @@ const CompanyProfileSchema = new Schema<ICompanyProfile>(
   { _id: false }
 );
 
+ 
+const SubscriptionSchema = new Schema<ISubscription>(
+  {
+    plan:               { type: String, enum: ['free', 'monthly', 'yearly'], default: 'free' },
+    status:             { type: String, enum: ['active', 'expired', 'cancelled'], default: 'active' },
+    startDate:          { type: Date },
+    endDate:            { type: Date },
+    aiQueriesUsedToday: { type: Number, default: 0 },
+    lastAiQueryDate:    { type: Date },
+  },
+  { _id: false }
+);
+
 const AppPreferencesSchema = new Schema<IAppPreferences>(
   {
     theme:                { type: String, enum: ['light', 'dark', 'system'], default: 'system' },
@@ -184,6 +215,7 @@ const UserSchema = new Schema<IUser>(
     otp:              { type: String },           // bcrypt-hashed OTP
     otpExpiresAt:     { type: Date },
     settings: { type: SettingsSchema, default: () => ({}) },
+    subscription: { type: SubscriptionSchema, default: () => ({ plan: 'free', status: 'active', aiQueriesUsedToday: 0 }) },
   },
   {
     timestamps: true,

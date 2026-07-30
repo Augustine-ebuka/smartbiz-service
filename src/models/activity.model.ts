@@ -21,7 +21,10 @@ export type ActivityAction =
   | 'saleskeeper.invite'
   | 'saleskeeper.revoke'
   | 'saleskeeper.reinstate'
-  | 'saleskeeper.permissions_updated';
+  | 'saleskeeper.permissions_updated'
+  | 'subscription.manual_activate'
+  | 'subscription.manual_revoke'
+  | 'subscription.manual_edit';
 
 // ─── Interface ────────────────────────────────────────────────────────────────
 

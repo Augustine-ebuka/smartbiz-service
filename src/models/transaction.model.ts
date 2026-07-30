@@ -8,6 +8,7 @@ export interface ITransaction extends Document {
     amount: number;
     trans_ref: string;
     payment_reference: string;
+    checkout_url?: string;
     purchase_info: {
         product_id: Schema.Types.ObjectId;
         quantity: number;
@@ -18,6 +19,10 @@ export interface ITransaction extends Document {
     address: string;
     products: any[];
     customer_id: Schema.Types.ObjectId;
+    /** What this transaction is for — 'catalog' (default) triggers the income/stock flow on webhook; 'subscription' activates a plan instead. */
+    purpose?: "catalog" | "subscription";
+    /** Extra context for non-catalog purposes, e.g. { planId } for subscription upgrades. */
+    metadata?: Record<string, any>;
 
 }
 
@@ -28,6 +33,7 @@ const TransactionSchema: Schema = new Schema({
     amount: { type: Number, required: true },
     trans_ref: { type: String, required: true, unique: true },
     payment_reference: { type: String, required: false },
+    checkout_url: { type: String, required: false },
     purchase_info: {
         product_id: { type: Schema.Types.ObjectId, ref: 'Product', required: false },
         quantity: { type: Number, required: false },
@@ -38,6 +44,8 @@ const TransactionSchema: Schema = new Schema({
     address: { type: String, required: false },
     products: [{ type: Object, required: false }],
     customer_id: { type: Schema.Types.ObjectId, ref: 'Customer', required: false },
+    purpose: { type: String, enum: ['catalog', 'subscription'], default: 'catalog' },
+    metadata: { type: Object, required: false },
 
 }, {
     timestamps: true

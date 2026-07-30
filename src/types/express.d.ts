@@ -5,6 +5,7 @@ declare global {
         interface Request {
             user: IUser;
             userId: string;
+            businessOwnerId?: string;
         }
     }
 }

@@ -20,6 +20,8 @@ import bulkUploadRoute from './bulkupload.route';
 import ocrRoute from './ocr.route';
 import aiRoute from './ai.route';
 import aiChatEntryRoute from './aichatEntry.route';
+import subscriptionRoute from './subscription.route';
+import adminRoute from './admin.route';
 
 
 
@@ -42,6 +44,8 @@ router.use("/v1/bulk-upload", bulkUploadRoute);
 router.use("/v1/ocr", ocrRoute);
 router.use("/v1/ai", aiRoute);
 router.use("/v1/ai", aiChatEntryRoute);
+router.use("/v1/subscription", subscriptionRoute);
+router.use("/v1/admin", adminRoute);
 
 
 

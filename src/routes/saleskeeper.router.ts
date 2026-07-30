@@ -3,6 +3,7 @@ import { authenticateToken } from '../middlewares/authMiddleware';
 import { resolveBusinessOwner, requireOwner } from '../middlewares/businessOwnerMiddleware';
 import SaleskeeperController from '../controllers/saleskeeperController';
 import { authorizationMiddleware } from '../middlewares/authorizationMiddleware';
+import { checkSubscription } from '../middlewares/subscriptionMiddleware';
 const router = Router();
 
 // All saleskeeper management routes:
@@ -17,7 +18,7 @@ router.use(authenticateToken, resolveBusinessOwner, requireOwner);
 // PATCH  /api/saleskeepers/:id/reinstate  → reinstate access
 // DELETE /api/saleskeepers/:id       → remove permanently
 
-router.post  ('/invite', authorizationMiddleware(['admin', 'business_owner']), SaleskeeperController.invite);
+router.post  ('/invite', authorizationMiddleware(['admin', 'business_owner']), checkSubscription('saleskeeper'), SaleskeeperController.invite);
 router.get   ('/',                   SaleskeeperController.getAll);
 router.patch ('/:id/revoke',         authorizationMiddleware(['admin', 'business_owner']), SaleskeeperController.revoke);
 router.patch ('/:id/reinstate',      authorizationMiddleware(['admin', 'business_owner']), SaleskeeperController.reinstate);

@@ -10,6 +10,7 @@ import ExpenseService from '../services/expensesService';
 import inventoryService from '../services/inventory.service';
 import { createDebtRecord, markDebtRecordAsPaid } from '../services/debtrecordService';
 import { DebtRecordModel } from '../models/debtrecord';
+import subscriptionService from '../services/subscriptionService';
 
 const router = express.Router();
 
@@ -234,11 +235,21 @@ router.post('/chat/entry', async (req, res) => {
       return;
     }
 
-    // 1. Pass the user text + conversation so far through Gemini
+    // 1. Enforce the plan's daily AI quota — counted per actual Gemini call, so
+    // the deterministic pendingConfirmation resume above (which never touches
+    // the AI) doesn't burn a query.
+    try {
+      await subscriptionService.checkAndIncrementAiUsage(userId);
+    } catch (limitError: any) {
+      res.status(403).json({ success: false, message: limitError.message, upgradeRequired: true });
+      return;
+    }
+
+    // 2. Pass the user text + conversation so far through Gemini
     const aiResult = await parseConversationalEntry(message, incomingHistory);
     const { actionType, payload, replyToUser } = aiResult;
 
-    // 2. Route the output payload to the real database services
+    // 3. Route the output payload to the real database services
     switch (actionType) {
       case 'ADD_INCOME': {
         // No explicit amount stated — if the product is known and priced, derive

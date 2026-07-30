@@ -10,6 +10,7 @@ import { Customer } from '../models/customer.model';
 import inventoryService from '../services/inventory.service';
 import {Product} from '../models/product.model';
 import emailService from '../services/EmailService';
+import subscriptionService from '../services/subscriptionService';
 /**
  * POST /reserved-accounts
  * Creates a dedicated virtual account for a customer.
@@ -416,6 +417,19 @@ export const handleMonnifyWebhook = async (req: Request, res: Response): Promise
           transaction.status = 'successful';
           transaction.payment_reference = paymentReference;
           await transaction.save();
+
+          // Subscription upgrades aren't catalog sales — activate the plan and
+          // skip the income/stock/email flow below, which assumes real products.
+          if (transaction.purpose === 'subscription' && transaction.metadata?.planId) {
+            await subscriptionService.activatePlan(
+              transaction.user_id.toString(),
+              transaction.metadata.planId,
+              transactionReference
+            );
+            console.log(`[Subscription] Activated ${transaction.metadata.planId} for user ${transaction.user_id}`);
+            res.status(200).send('Webhook Received');
+            return;
+          }
 
           // then creat an income record in db
           // loop through products and create an income record for each product

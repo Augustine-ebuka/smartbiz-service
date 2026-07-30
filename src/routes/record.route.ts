@@ -4,6 +4,7 @@ import { authenticateToken } from '../middlewares/authMiddleware';
 import ExpenseController from '../controllers/expenseController';
 import IncomeController from '../controllers/incomeController';
 import {resolveBusinessOwner} from '../middlewares/businessOwnerMiddleware';
+import { checkSubscription } from '../middlewares/subscriptionMiddleware';
 
 const router = Router();
 
@@ -18,7 +19,7 @@ router.use(authenticateToken, resolveBusinessOwner);
 // PATCH  /api/transactions/expenses/:id          → update expense
 // DELETE /api/transactions/expenses/:id          → delete expense
 
-router.post  ('/expenses',          ExpenseController.create);
+router.post  ('/expenses',          checkSubscription('expense'), ExpenseController.create);
 router.get   ('/expenses',          ExpenseController.getAll);
 router.get   ('/expenses/summary',  ExpenseController.getSummary);   // must be before /:id
 router.get   ('/expenses/:id',      ExpenseController.getById);
@@ -33,7 +34,7 @@ router.delete('/expenses/:id',      ExpenseController.delete);
 // PATCH  /api/transactions/income/:id            → update income record
 // DELETE /api/transactions/income/:id            → delete income record
 
-router.post  ('/income',            IncomeController.create);
+router.post  ('/income',            checkSubscription('income'), IncomeController.create);
 router.get   ('/income',            IncomeController.getAll);
 router.get   ('/income/summary',    IncomeController.getSummary);    // must be before /:id
 router.get   ('/income/:id',        IncomeController.getById);

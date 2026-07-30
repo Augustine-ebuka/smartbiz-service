@@ -5,6 +5,7 @@ import CustomerController from '../controllers/customerController';
 import ProductController from '../controllers/productController';
 import ExpenseCategoryController from '../controllers/expenseCategoryController';
 import {resolveBusinessOwner} from '../middlewares/businessOwnerMiddleware';
+import { checkSubscription } from '../middlewares/subscriptionMiddleware';
 const router = Router();
 
 // public products of a business ownwer
@@ -20,7 +21,7 @@ router.use(authenticateToken);
 // DELETE /api/catalog/customers/:id     → delete customer
 
 router.use(resolveBusinessOwner);
-router.post  ('/customers',     CustomerController.create);
+router.post  ('/customers',     checkSubscription('customers'), CustomerController.create);
 router.get   ('/customers',     CustomerController.getAll);
 router.get   ('/customers/:id', CustomerController.getById);
 router.patch ('/customers/:id', CustomerController.update);
@@ -33,7 +34,7 @@ router.delete('/customers/:id', CustomerController.delete);
 // PATCH  /api/catalog/products/:id      → update product/service
 // DELETE /api/catalog/products/:id      → delete product/service
 
-router.post  ('/products',     ProductController.create);
+router.post  ('/products',     checkSubscription('products'), ProductController.create);
 router.get   ('/products',     ProductController.getAll);
 router.patch('/products/toggle-public', ProductController.togglePublic);
 router.get   ('/products/:id', ProductController.getById);
