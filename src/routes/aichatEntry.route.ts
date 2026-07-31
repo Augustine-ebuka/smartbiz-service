@@ -454,7 +454,7 @@ router.post('/chat/entry', async (req, res) => {
 
         const matches: any[] = await DebtRecordModel.find(query);
         if (matches.length === 0) {
-          res.json({ reply: `I couldn't find an outstanding debt for ${payload.customerName}${payload.amount ? ` of ₦${payload.amount}` : ''}.`, history: [] });
+          res.json({ reply: `I couldn't find an outstanding debt for ${payload.customerName}${payload.amount ? ` of ₦${payload.amount.toLocaleString()}` : ''}.`, history: [] });
           return;
         }
         if (matches.length > 1) {
