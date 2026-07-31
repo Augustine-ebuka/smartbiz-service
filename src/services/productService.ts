@@ -8,6 +8,7 @@ export interface CreateProductDTO {
   type: ProductType;
   price: number;
   description?: string;
+  barcode?: string;
 }
 
 export type UpdateProductDTO = Partial<CreateProductDTO>;

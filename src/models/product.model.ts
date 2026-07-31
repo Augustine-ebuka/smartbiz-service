@@ -15,6 +15,7 @@ export interface IProduct extends Document {
   description?: string;
   imageUrl?: string;
   isPublic: boolean;
+  barcode?: string;                // optional barcode for physical goods
 
   // ── Inventory fields (only relevant when type === 'Good') ──────────────────
   trackStock: boolean;           // false for services, true for physical goods
@@ -35,6 +36,7 @@ const ProductSchema = new Schema<IProduct>(
     description: { type: String, trim: true },
     imageUrl:      { type: String, trim: true },
     isPublic:      { type: Boolean, default: false },
+    barcode:       { type: String, unique: true, sparse: true },  // optional unique barcode
     
     // Inventory
     trackStock:        { type: Boolean, default: false },
