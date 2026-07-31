@@ -19,6 +19,15 @@ export async function authenticateToken(req: Request | any, res: Response | any,
     if (!user) {
         return res.status(401).json({ error: "Access denied. User not found!" });
     }
+
+    // Throttled "last active" tracking — only write if it's been 10+ minutes
+    // since the last recorded activity, and never block the request on it.
+    const ACTIVITY_THROTTLE_MS = 10 * 60 * 1000;
+    if (!user.lastActiveAt || Date.now() - user.lastActiveAt.getTime() > ACTIVITY_THROTTLE_MS) {
+      User.findByIdAndUpdate(user._id, { $set: { lastActiveAt: new Date() } })
+        .catch((err) => console.error('[Activity] Failed to update lastActiveAt:', err));
+    }
+
     req.userId = decoded.userId;
     next();
   } catch (error: any) {

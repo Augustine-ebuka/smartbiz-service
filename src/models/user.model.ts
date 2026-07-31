@@ -103,6 +103,7 @@ export interface IUser extends Document {
   subscription?: ISubscription;
   ownerId?: string;          // set for saleskeepers — points to the business owner's userId
   avatarUrl?: string;        // user profile avatar
+  lastActiveAt?: Date;       // updated (throttled) on authenticated requests — see authMiddleware
   comparePassword(candidatePassword: string): Promise<boolean>;
   compareOtp(candidateOtp: string): Promise<boolean>;
 }
@@ -214,6 +215,7 @@ const UserSchema = new Schema<IUser>(
     avatarUrl:        { type: String, trim: true },
     otp:              { type: String },           // bcrypt-hashed OTP
     otpExpiresAt:     { type: Date },
+    lastActiveAt:     { type: Date },
     settings: { type: SettingsSchema, default: () => ({}) },
     subscription: { type: SubscriptionSchema, default: () => ({ plan: 'free', status: 'active', aiQueriesUsedToday: 0 }) },
   },

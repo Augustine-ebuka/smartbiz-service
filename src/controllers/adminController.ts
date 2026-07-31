@@ -28,14 +28,53 @@ class AdminController {
       }
 
       const skip = (pageNum - 1) * limitNum;
-      const [users, total] = await Promise.all([
+      const now  = new Date();
+
+      const [users, total, totalUsers, planCounts] = await Promise.all([
         User.find(query)
-          .select('firstName lastName email phone role isActive isEmailVerified subscription createdAt settings.companyProfile.businessName')
+          .select('firstName lastName email phone role isActive isEmailVerified subscription createdAt lastActiveAt settings.companyProfile.businessName')
           .sort({ createdAt: -1 })
           .skip(skip)
           .limit(limitNum)
           .lean(),
         User.countDocuments(query),
+        // Platform-wide totals — deliberately NOT scoped to the search/role/isActive
+        // filters above, since this is a dashboard summary, not a count of this page.
+        User.countDocuments({}),
+        User.aggregate([
+          {
+            $project: {
+              // A plan only counts as active if status is 'active' AND endDate
+              // hasn't passed — subscriptions expire lazily (only synced to
+              // 'free' on the user's next relevant request), so trusting the
+              // raw stored plan/status directly would overcount paid users
+              // who've actually already lapsed.
+              effectivePlan: {
+                $let: {
+                  vars: {
+                    plan:    { $ifNull: ['$subscription.plan', 'free'] },
+                    status:  { $ifNull: ['$subscription.status', 'active'] },
+                    endDate: '$subscription.endDate',
+                  },
+                  in: {
+                    $cond: [
+                      {
+                        $and: [
+                          { $ne: ['$$plan', 'free'] },
+                          { $eq: ['$$status', 'active'] },
+                          { $gt: ['$$endDate', now] },
+                        ],
+                      },
+                      '$$plan',
+                      'free',
+                    ],
+                  },
+                },
+              },
+            },
+          },
+          { $group: { _id: '$effectivePlan', count: { $sum: 1 } } },
+        ]),
       ]);
 
       // businessName lives at settings.companyProfile.businessName — flatten it
@@ -45,6 +84,11 @@ class AdminController {
         businessName: settings?.companyProfile?.businessName ?? null,
       }));
 
+      const byPlan = { free: 0, monthly: 0, yearly: 0 };
+      for (const row of planCounts) {
+        if (row._id in byPlan) byPlan[row._id as keyof typeof byPlan] = row.count;
+      }
+
       res.status(200).json({
         success: true,
         data,
@@ -53,6 +97,10 @@ class AdminController {
           limit: limitNum,
           total,
           totalPages: Math.ceil(total / limitNum),
+        },
+        stats: {
+          totalUsers,
+          byPlan,
         },
       });
     } catch (error) {
@@ -67,7 +115,7 @@ class AdminController {
   async getUserById(req: Request, res: Response, next: NextFunction) {
     try {
       const user = await User.findById(req.params.id)
-        .select('firstName lastName email phone role isActive isEmailVerified ownerId subscription createdAt settings.companyProfile.businessName')
+        .select('firstName lastName email phone role isActive isEmailVerified ownerId subscription createdAt lastActiveAt settings.companyProfile.businessName')
         .lean();
       if (!user) {
         res.status(404).json({ success: false, message: 'User not found.' });

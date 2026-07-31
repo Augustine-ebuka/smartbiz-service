@@ -133,6 +133,8 @@ function getPeriodRange(period?: string, date?: string): { startDate?: string; e
     return { startDate: start.toISOString(), endDate: end.toISOString() };
   }
 
+  
+
   return {}; // ALL_TIME — no bounds
 }
 

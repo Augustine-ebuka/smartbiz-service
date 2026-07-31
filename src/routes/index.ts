@@ -22,7 +22,7 @@ import aiRoute from './ai.route';
 import aiChatEntryRoute from './aichatEntry.route';
 import subscriptionRoute from './subscription.route';
 import adminRoute from './admin.route';
-
+import supportRoute from './support.routes';
 
 
 router.use("/v1/auth", authRoute);
@@ -46,6 +46,7 @@ router.use("/v1/ai", aiRoute);
 router.use("/v1/ai", aiChatEntryRoute);
 router.use("/v1/subscription", subscriptionRoute);
 router.use("/v1/admin", adminRoute);
+router.use("/v1/support", supportRoute);
 
 
 
