@@ -1,6 +1,7 @@
 import { AnyAaaaRecord } from 'node:dns';
 import { Product, IProduct, ProductType } from '../models/product.model';
 import { User } from '../models/user.model';
+import ApiError from '../utils/ApiError';
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
 export interface CreateProductDTO {
@@ -19,7 +20,14 @@ class ProductService {
 
   async create(userId: string, payload: CreateProductDTO): Promise<IProduct> {
     const product = new Product({ userId, ...payload });
-    return product.save();
+    try {
+      return await product.save();
+    } catch (error: any) {
+      if (error?.code === 11000 && error?.keyPattern?.barcode) {
+        throw new ApiError(409, `A product with barcode "${payload.barcode}" already exists.`);
+      }
+      throw error;
+    }
   }
 
   async getAll(
@@ -63,11 +71,19 @@ class ProductService {
   }
 
   async update(userId: string, productId: string, payload: UpdateProductDTO): Promise<IProduct> {
-    const product = await Product.findOneAndUpdate(
-      { _id: productId, userId },
-      { $set: payload },
-      { new: true, runValidators: true }
-    );
+    let product;
+    try {
+      product = await Product.findOneAndUpdate(
+        { _id: productId, userId },
+        { $set: payload },
+        { new: true, runValidators: true }
+      );
+    } catch (error: any) {
+      if (error?.code === 11000 && error?.keyPattern?.barcode) {
+        throw new ApiError(409, `A product with barcode "${payload.barcode}" already exists.`);
+      }
+      throw error;
+    }
     if (!product) throw new Error('Product not found.');
     return product;
   }
