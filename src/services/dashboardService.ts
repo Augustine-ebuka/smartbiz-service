@@ -52,6 +52,10 @@ export interface DashboardData {
     cashBalance: number;
     totalCustomers: number;
     totalStaff: number;
+    totalIncomeCount: number;
+    totalExpenseCount: number;
+    incomeCountToday: number;
+    expenseCountToday: number;
   };
   last7Days: DayPoint[];
   recentActivity: RecentActivityItem[];
@@ -88,12 +92,12 @@ class DashboardService {
 
       Income.aggregate([
         { $match: { userId, date: { $gte: todayStart, $lte: todayEnd } } },
-        { $group: { _id: null, total: { $sum: '$amount' } } },
+        { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } },
       ]),
 
       Expense.aggregate([
         { $match: { userId, date: { $gte: todayStart, $lte: todayEnd } } },
-        { $group: { _id: null, total: { $sum: '$amount' } } },
+        { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } },
       ]),
 
       Income.aggregate([
@@ -108,12 +112,12 @@ class DashboardService {
 
       Income.aggregate([
         { $match: { userId } },
-        { $group: { _id: null, total: { $sum: '$amount' } } },
+        { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } },
       ]),
 
       Expense.aggregate([
         { $match: { userId } },
-        { $group: { _id: null, total: { $sum: '$amount' } } },
+        { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } },
       ]),
 
       Income.aggregate([
@@ -167,6 +171,10 @@ class DashboardService {
       cashBalance:     (allTimeIncome[0]?.total    ?? 0) - (allTimeExpenses[0]?.total   ?? 0),
       totalCustomers,
       totalStaff,
+      totalIncomeCount:  allTimeIncome[0]?.count  ?? 0,
+      totalExpenseCount: allTimeExpenses[0]?.count ?? 0,
+      incomeCountToday:  salesToday[0]?.count      ?? 0,
+      expenseCountToday: expensesToday[0]?.count   ?? 0,
     };
 
     // ── Build 7-day chart data ────────────────────────────────────────────────

@@ -10,6 +10,7 @@ export interface IExpense extends Document {
   date: Date;
   vendor?: string;
   note?: string;
+  image_url?: string;                      // uploaded receipt/invoice image
   receiptUrl?: string;                    // uploaded receipt/invoice image
   createdAt: Date;
   updatedAt: Date;
