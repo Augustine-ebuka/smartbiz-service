@@ -23,7 +23,7 @@ import aiChatEntryRoute from './aichatEntry.route';
 import subscriptionRoute from './subscription.route';
 import adminRoute from './admin.route';
 import supportRoute from './support.routes';
-
+import invoiceRoutes from './invoice.routes';
 
 router.use("/v1/auth", authRoute);
 router.use("/v1/wallet", walletRoute);
@@ -47,7 +47,7 @@ router.use("/v1/ai", aiChatEntryRoute);
 router.use("/v1/subscription", subscriptionRoute);
 router.use("/v1/admin", adminRoute);
 router.use("/v1/support", supportRoute);
-
+router.use("/v1/invoices", invoiceRoutes);
 
 
 router.get("/v1", (req, res) => {
