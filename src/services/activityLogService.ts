@@ -62,6 +62,7 @@ class ActivityLogService {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
+      .populate('actorId', 'firstName lastName role')  // populate actor's name and role
       .lean();
 
     return {

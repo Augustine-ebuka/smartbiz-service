@@ -24,6 +24,7 @@ import subscriptionRoute from './subscription.route';
 import adminRoute from './admin.route';
 import supportRoute from './support.routes';
 import invoiceRoutes from './invoice.routes';
+import vendorRoute from './vendor.routes';
 
 router.use("/v1/auth", authRoute);
 router.use("/v1/wallet", walletRoute);
@@ -48,7 +49,7 @@ router.use("/v1/subscription", subscriptionRoute);
 router.use("/v1/admin", adminRoute);
 router.use("/v1/support", supportRoute);
 router.use("/v1/invoices", invoiceRoutes);
-
+router.use("/v1/vendors", vendorRoute);
 
 router.get("/v1", (req, res) => {
   res.send("Welcome smart biz to Version 1 API");

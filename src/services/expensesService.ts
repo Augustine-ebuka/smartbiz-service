@@ -2,6 +2,15 @@ import { Expense, IExpense } from '../models/expense.model';
 import { ExpenseCategory } from '../models/expenseCategory.model';
 import { ActivityAction } from '../models/activity.model';
 import activityLogService from '../services/activityLogService';
+import { User } from '../models/user.model';
+
+async function getActorInfo(userId: string): Promise<{ actorName: string; actorRole: string }> {
+  const actor = await User.findById(userId).select('firstName lastName role');
+  return {
+    actorName: actor ? `${actor.firstName} ${actor.lastName}`.trim() : 'Unknown',
+    actorRole: actor?.role ?? 'unknown',
+  };
+}
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -64,19 +73,22 @@ class ExpenseService {
       ...payload,
       date: payload.date ? new Date(payload.date) : new Date(),
     });
-    // activity log
+    const saved = await expense.save();
+
+    // activity log — after save, so a failed create never logs a false "created" entry
+    const { actorName, actorRole } = await getActorInfo(userId);
     await activityLogService.log({
       businessOwnerId: userId,
       actorId: userId,
-      actorName: userId,
-      actorRole: 'Expense',
+      actorName,
+      actorRole,
       action: 'expense.create',
       description: payload.note || 'Expense expense created',
-      resourceId: expense._id,
+      resourceId: saved._id,
       amount: payload.amount,
     });
 
-    return expense.save();
+    return saved;
   }
 
   async getAll(userId: string, filters: ExpenseFilterDTO = {}): Promise<PaginatedResult<IExpense>> {
@@ -151,11 +163,12 @@ class ExpenseService {
 
     if (!expense) throw new Error('Expense not found.');
     // activity log
+    const { actorName, actorRole } = await getActorInfo(userId);
     await activityLogService.log({
       businessOwnerId: userId,
       actorId: userId,
-      actorName: userId,
-      actorRole: 'Expense',
+      actorName,
+      actorRole,
       action: 'expense.update',
       description: payload.note || 'Expense expense updated',
       resourceId: expense._id,
@@ -168,11 +181,12 @@ class ExpenseService {
     const result = await Expense.findOneAndDelete({ _id: expenseId, userId });
     if (!result) throw new Error('Expense not found.');
     // activity log
+    const { actorName, actorRole } = await getActorInfo(userId);
     await activityLogService.log({
       businessOwnerId: userId,
       actorId: userId,
-      actorName: userId,
-      actorRole: 'Expense',
+      actorName,
+      actorRole,
       action: 'expense.delete',
       description: 'Expense expense deleted',
       resourceId: expenseId,
