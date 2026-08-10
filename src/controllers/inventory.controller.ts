@@ -47,7 +47,7 @@ class InventoryController {
   async updateSettings(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req as any).businessOwnerId as string;
-      const product = await inventoryService.updateStockSettings(userId, req.params.productId, req.body);
+      const product = await inventoryService.updateStockSettings(userId, req.params.productId, req.body, req.userId as string);
       res.status(200).json({
         success: true,
         message: 'Stock settings updated successfully.',
@@ -76,7 +76,8 @@ class InventoryController {
       const { product, isLowStock } = await inventoryService.adjustStock(
         userId,
         req.params.productId,
-        { quantity, movementType, note }
+        { quantity, movementType, note },
+        req.userId as string
       );
 
       res.status(200).json({

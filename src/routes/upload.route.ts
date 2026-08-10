@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middlewares/authMiddleware';
+import { resolveBusinessOwner } from '../middlewares/businessOwnerMiddleware';
 import { uploadLogo, uploadFile, uploadAvatar } from '../middlewares/uploadMidleware';
 import UploadController from '../controllers/uploadCntroller';
 
 const router = Router();
 
-router.use(authenticateToken);
+router.use(authenticateToken, resolveBusinessOwner);
 
 // POST /api/upload/logo      → multipart, field: "logo"
 // POST /api/upload/receipt   → multipart, field: "receipt"

@@ -51,6 +51,16 @@ interface SendPurchaseReceiptOptions {
   paidAt: Date;
 }
 
+interface SendWalletFundedOptions {
+  to: string;
+  firstName: string;
+  amount: number;          // in naira, not kobo
+  newBalance: number;      // in naira, not kobo
+  reference: string;
+  source: 'automatic' | 'manual';
+  fundedAt: Date;
+}
+
 // ─── Resend client ────────────────────────────────────────────────────────────
 
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -499,6 +509,90 @@ function purchaseReceiptTemplate(
   `;
 }
 
+// ─── Wallet Funded Template ────────────────────────────────────────────────────
+
+function walletFundedTemplate(
+  firstName: string,
+  amount: number,
+  newBalance: number,
+  reference: string,
+  source: 'automatic' | 'manual',
+  fundedAt: Date
+): string {
+  const fmt = (n: number) => `₦${n.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+  const dateStr = new Date(fundedAt).toLocaleString('en-NG', {
+    dateStyle: 'long', timeStyle: 'short', timeZone: 'Africa/Lagos',
+  });
+  const sourceLabel = source === 'manual' ? 'Manual credit' : 'Bank transfer / card deposit';
+
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+    <title>Wallet Funded</title></head>
+    <body style="margin:0;padding:0;background:#f4f4f5;font-family:Arial,sans-serif">
+      <div style="max-width:560px;margin:40px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)">
+
+        <!-- Header -->
+        <div style="background:linear-gradient(135deg,#16a34a 0%,#0f172a 100%);padding:32px 40px;text-align:center">
+          <div style="font-size:36px;margin-bottom:8px">💰</div>
+          <h1 style="margin:0;color:#fff;font-size:22px">Wallet Funded</h1>
+        </div>
+
+        <!-- Body -->
+        <div style="padding:32px 40px">
+
+          <p style="color:#374151;font-size:15px;margin:0 0 4px">Hi <strong>${firstName}</strong>,</p>
+          <p style="color:#374151;font-size:15px;margin:0 0 28px">
+            Your wallet has just been credited. Here are the details.
+          </p>
+
+          <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:28px">
+
+            <div style="background:#16a34a;padding:20px;text-align:center">
+              <p style="margin:0;color:#bbf7d0;font-size:12px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">Amount Credited</p>
+              <p style="margin:6px 0 0;color:#fff;font-size:28px;font-weight:800">+${fmt(amount)}</p>
+            </div>
+
+            <div style="padding:0 20px">
+              <div style="display:flex;justify-content:space-between;padding:14px 0;border-bottom:1px solid #f3f4f6">
+                <span style="color:#6b7280;font-size:13px">New Balance</span>
+                <span style="color:#111827;font-size:13px;font-weight:700">${fmt(newBalance)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;padding:14px 0;border-bottom:1px solid #f3f4f6">
+                <span style="color:#6b7280;font-size:13px">Source</span>
+                <span style="color:#111827;font-size:13px;font-weight:600">${sourceLabel}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;padding:14px 0;border-bottom:1px solid #f3f4f6">
+                <span style="color:#6b7280;font-size:13px">Reference</span>
+                <span style="color:#111827;font-size:13px;font-weight:600;font-family:monospace">${reference}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;padding:14px 0">
+                <span style="color:#6b7280;font-size:13px">Date</span>
+                <span style="color:#111827;font-size:13px;font-weight:600">${dateStr}</span>
+              </div>
+            </div>
+          </div>
+
+          <p style="color:#6b7280;font-size:13px;text-align:center;margin:0">
+            If you don't recognize this transaction, please contact support immediately.
+          </p>
+
+        </div>
+
+        <!-- Footer -->
+        <div style="background:#f9fafb;padding:20px 40px;text-align:center;border-top:1px solid #f3f4f6">
+          <p style="color:#9ca3af;font-size:12px;margin:0">
+            © ${new Date().getFullYear()} Your Business App. All rights reserved.
+          </p>
+        </div>
+
+      </div>
+    </body>
+    </html>
+  `;
+}
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 class EmailService {
@@ -563,6 +657,16 @@ class EmailService {
     });
   }
 
+  async sendWalletFunded({
+    to, firstName, amount, newBalance, reference, source, fundedAt,
+  }: SendWalletFundedOptions): Promise<void> {
+    await resend.emails.send({
+      from:    FROM_ADDRESS,
+      to,
+      subject: `💰 Your wallet was credited with ₦${amount.toLocaleString('en-NG')}`,
+      html:    walletFundedTemplate(firstName, amount, newBalance, reference, source, fundedAt),
+    });
+  }
 
 }
 

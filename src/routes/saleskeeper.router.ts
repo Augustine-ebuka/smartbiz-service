@@ -24,4 +24,9 @@ router.patch ('/:id/revoke',         authorizationMiddleware(['admin', 'business
 router.patch ('/:id/reinstate',      authorizationMiddleware(['admin', 'business_owner']), SaleskeeperController.reinstate);
 router.delete('/:id',                authorizationMiddleware(['admin', 'business_owner']), SaleskeeperController.remove);
 
+// GET   /api/saleskeepers/:id/employee-profile   → view a saleskeeper's payroll info
+// PATCH /api/saleskeepers/:id/employee-profile   → set/update payroll info
+router.get   ('/:id/employee-profile', SaleskeeperController.getEmployeeProfile);
+router.patch ('/:id/employee-profile', authorizationMiddleware(['admin', 'business_owner']), SaleskeeperController.updateEmployeeProfile);
+
 export default router;

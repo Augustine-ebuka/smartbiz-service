@@ -9,6 +9,8 @@ export interface PlanLimits {
   expensePerMonth:      number;    // -1 = unlimited
   customers:            number;    // -1 = unlimited (total, not per month)
   products:             number;    // -1 = unlimited (total)
+  invoices:             number;    // -1 = unlimited (lifetime total, not per month)
+  vendors:              number;    // -1 = unlimited (lifetime total)
   saleskeeperInvites:   number;    // -1 = unlimited
   bulkImport:           boolean;
   fullReports:          boolean;
@@ -34,6 +36,8 @@ export const PLANS: Record<PlanId, Plan> = {
       expensePerMonth:    50,
       customers:          20,
       products:           10,
+      invoices:           1,
+      vendors:            1,
       saleskeeperInvites: 1,
       bulkImport:         false,
       fullReports:        false,
@@ -51,6 +55,8 @@ export const PLANS: Record<PlanId, Plan> = {
       expensePerMonth:    -1,
       customers:          -1,
       products:           -1,
+      invoices:           -1,
+      vendors:            -1,
       saleskeeperInvites: 5,
       bulkImport:         true,
       fullReports:        true,
@@ -68,6 +74,8 @@ export const PLANS: Record<PlanId, Plan> = {
       expensePerMonth:    -1,
       customers:          -1,
       products:           -1,
+      invoices:           -1,
+      vendors:            -1,
       saleskeeperInvites: -1,
       bulkImport:         true,
       fullReports:        true,

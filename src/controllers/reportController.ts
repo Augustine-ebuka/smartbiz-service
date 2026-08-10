@@ -14,7 +14,7 @@ class ReportsController {
    */
   async getReports(req: Request, res: Response, next: NextFunction) {
     try {
-      const userId = req.userId as string;
+      const userId = (req as any).businessOwnerId as string;
 
       const rangeKey  = (req.query.range as DateRangeKey) ?? 'this-month';
       const startDate = req.query.startDate as string | undefined;

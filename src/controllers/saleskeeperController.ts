@@ -101,6 +101,44 @@ class SaleskeeperController {
     }
   }
 
+  /**
+   * GET /api/saleskeepers/:id/employee-profile
+   * Fetch a saleskeeper's payroll info
+   */
+  async getEmployeeProfile(req: Request, res: Response, next: NextFunction) {
+    try {
+      const ownerId = req.userId as string;
+      const staff = await SaleskeeperService.getEmployeeProfile(ownerId, req.params.id);
+      res.status(200).json({
+        success: true,
+        message: 'Employee profile fetched successfully.',
+        data: staff,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * PATCH /api/saleskeepers/:id/employee-profile
+   * Set/update payroll info — any subset of: jobTitle, department, salary,
+   * payFrequency, hireDate, bankDetails, taxId, pensionId,
+   * emergencyContactName, emergencyContactPhone
+   */
+  async updateEmployeeProfile(req: Request, res: Response, next: NextFunction) {
+    try {
+      const ownerId = req.userId as string;
+      const staff = await SaleskeeperService.updateEmployeeProfile(ownerId, req.params.id, req.body ?? {});
+      res.status(200).json({
+        success: true,
+        message: 'Employee profile updated successfully.',
+        data: staff,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
 }
 
 export default new SaleskeeperController();

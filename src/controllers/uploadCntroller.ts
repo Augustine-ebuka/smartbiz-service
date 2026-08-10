@@ -15,7 +15,7 @@ class UploadController {
         return;
       }
 
-      const userId  = req.userId as string;
+      const userId  = (req as any).businessOwnerId as string;
       const logoUrl = (req.file as any).path;   // Cloudinary returns the URL in req.file.path
 
       await User.findByIdAndUpdate(userId, {

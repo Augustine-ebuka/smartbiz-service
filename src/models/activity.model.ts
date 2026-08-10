@@ -15,6 +15,14 @@ export type ActivityAction =
   | 'product.create'
   | 'product.update'
   | 'product.delete'
+  | 'stock.adjust'
+  | 'stock.settings_update'
+  | 'invoice.create'
+  | 'invoice.update'
+  | 'invoice.mark_paid'
+  | 'invoice.mark_sent'
+  | 'invoice.cancel'
+  | 'invoice.delete'
   | 'expense_category.create'
   | 'expense_category.update'
   | 'expense_category.delete'
@@ -22,9 +30,17 @@ export type ActivityAction =
   | 'saleskeeper.revoke'
   | 'saleskeeper.reinstate'
   | 'saleskeeper.permissions_updated'
+  | 'employee.profile_update'
+  | 'payroll.update_preferences'
+  | 'payroll.create_run'
+  | 'payroll.update_payslip'
+  | 'payroll.complete_run'
+  | 'payroll.cancel_run'
+  | 'payroll.mark_paid'
   | 'subscription.manual_activate'
   | 'subscription.manual_revoke'
-  | 'subscription.manual_edit';
+  | 'subscription.manual_edit'
+  | 'wallet.manual_credit';
 
 // ─── Interface ────────────────────────────────────────────────────────────────
 

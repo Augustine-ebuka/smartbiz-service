@@ -6,10 +6,15 @@ import {
   listVendorsHandler,
   updateVendorHandler,
 } from '../controllers/vendor.controller';
+import { authenticateToken } from '../middlewares/authMiddleware';
+import { resolveBusinessOwner } from '../middlewares/businessOwnerMiddleware';
+import { checkSubscription } from '../middlewares/subscriptionMiddleware';
 
 const router = Router();
 
-router.post('/', createVendorHandler);
+router.use(authenticateToken, resolveBusinessOwner);
+
+router.post('/', checkSubscription('vendors'), createVendorHandler);
 router.get('/', listVendorsHandler);
 router.get('/:id', getVendorHandler);
 router.patch('/:id', updateVendorHandler);

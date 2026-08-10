@@ -13,11 +13,13 @@ router.use(authorizationMiddleware(['admin']));
 // POST  /api/admin/users/:id/subscription/activate  → grant a plan with no payment
 // POST  /api/admin/users/:id/subscription/revoke    → immediately move a user to free
 // PATCH /api/admin/users/:id/subscription           → direct field-level edit
+// POST  /api/admin/users/:id/wallet/credit          → manually credit a wallet
 
 router.get   ('/users',                              AdminController.getAllUsers);
 router.get   ('/users/:id',                           AdminController.getUserById);
 router.post  ('/users/:id/subscription/activate',     AdminController.activateSubscription);
 router.post  ('/users/:id/subscription/revoke',       AdminController.revokeSubscription);
 router.patch ('/users/:id/subscription',              AdminController.editSubscription);
+router.post  ('/users/:id/wallet/credit',             AdminController.creditWallet);
 
 export default router;

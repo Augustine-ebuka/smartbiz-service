@@ -27,6 +27,7 @@ export const createVendorHandler = async (
   next: NextFunction,
 ): Promise<void> => {
   try {
+    const userId = req.businessOwnerId as string;
     const {
       name,
       contactPerson,
@@ -46,7 +47,7 @@ export const createVendorHandler = async (
       return;
     }
 
-    const vendor = await createVendor({
+    const vendor = await createVendor(userId, {
       name,
       contactPerson,
       category,
@@ -73,9 +74,10 @@ export const listVendorsHandler = async (
   next: NextFunction,
 ): Promise<void> => {
   try {
+    const userId = req.businessOwnerId as string;
     const { category, name } = req.query;
 
-    const vendors = await listVendors({
+    const vendors = await listVendors(userId, {
       category: typeof category === 'string' ? category : undefined,
       name: typeof name === 'string' ? name : undefined,
     });
@@ -93,7 +95,8 @@ export const getVendorHandler = async (
   next: NextFunction,
 ): Promise<void> => {
   try {
-    const vendor = await getVendorById(req.params.id);
+    const userId = req.businessOwnerId as string;
+    const vendor = await getVendorById(userId, req.params.id);
     res.status(200).json({ success: true, data: vendor });
   } catch (error) {
     handleControllerError(error, res, next);
@@ -107,7 +110,8 @@ export const updateVendorHandler = async (
   next: NextFunction,
 ): Promise<void> => {
   try {
-    const vendor = await updateVendor(req.params.id, req.body ?? {});
+    const userId = req.businessOwnerId as string;
+    const vendor = await updateVendor(userId, req.params.id, req.body ?? {});
     res.status(200).json({ success: true, data: vendor });
   } catch (error) {
     handleControllerError(error, res, next);
@@ -121,7 +125,8 @@ export const deleteVendorHandler = async (
   next: NextFunction,
 ): Promise<void> => {
   try {
-    await deleteVendor(req.params.id);
+    const userId = req.businessOwnerId as string;
+    await deleteVendor(userId, req.params.id);
     res.status(200).json({ success: true, message: 'Vendor deleted successfully' });
   } catch (error) {
     handleControllerError(error, res, next);

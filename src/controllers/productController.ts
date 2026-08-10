@@ -6,7 +6,7 @@ class ProductController {
   async create(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req as any).businessOwnerId as string;
-      const product = await ProductService.create(userId, req.body);
+      const product = await ProductService.create(userId, req.body, req.userId as string);
       res.status(201).json({
         success: true,
         message: 'Product created successfully.',
@@ -54,7 +54,7 @@ async getAll(req: Request, res: Response, next: NextFunction) {
   async update(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req as any).businessOwnerId as string;
-      const product = await ProductService.update(userId, req.params.id, req.body);
+      const product = await ProductService.update(userId, req.params.id, req.body, req.userId as string);
       res.status(200).json({
         success: true,
         message: 'Product updated successfully.',
@@ -67,8 +67,8 @@ async getAll(req: Request, res: Response, next: NextFunction) {
 
   async delete(req: Request, res: Response, next: NextFunction) {
     try {
-      const userId = req.userId as string;
-      await ProductService.delete(userId, req.params.id);
+      const userId = (req as any).businessOwnerId as string;
+      await ProductService.delete(userId, req.params.id, req.userId as string);
       res.status(200).json({
         success: true,
         message: 'Product deleted successfully.',

@@ -6,7 +6,7 @@ class IncomeController {
   async create(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req as any).businessOwnerId as string;
-      const income = await IncomeService.create(userId, req.body);
+      const income = await IncomeService.create(userId, req.body, req.userId as string);
       res.status(201).json({
         success: true,
         message: 'Income logged successfully.',
@@ -51,7 +51,7 @@ class IncomeController {
   async update(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req as any).businessOwnerId as string;
-      const income = await IncomeService.update(userId, req.params.id, req.body);
+      const income = await IncomeService.update(userId, req.params.id, req.body, req.userId as string);
       res.status(200).json({
         success: true,
         message: 'Income record updated successfully.',
@@ -64,8 +64,8 @@ class IncomeController {
 
   async delete(req: Request, res: Response, next: NextFunction) {
     try {
-      const userId = req.userId as string;
-      await IncomeService.delete(userId, req.params.id);
+      const userId = (req as any).businessOwnerId as string;
+      await IncomeService.delete(userId, req.params.id, req.userId as string);
       res.status(200).json({
         success: true,
         message: 'Income record deleted successfully.',
@@ -77,7 +77,7 @@ class IncomeController {
 
   async getSummary(req: Request, res: Response, next: NextFunction) {
     try {
-      const userId = req.userId as string;
+      const userId = (req as any).businessOwnerId as string;
       const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
       const summary = await IncomeService.getSummary(userId, startDate, endDate);
       res.status(200).json({

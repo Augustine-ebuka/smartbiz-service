@@ -58,6 +58,49 @@ export interface ISettings {
   appPreferences?: IAppPreferences;
 }
 
+// ─── Employee / Payroll Profile ────────────────────────────────────────────────
+// Attached to a staff account (role: 'staff') to enable payroll — deliberately
+// on the same User doc rather than a separate Employee collection, since a
+// staff member and an employee are the same person/account. Bank details reuse
+// the same shape as IBankingDetails (company banking) for consistency.
+
+export type PayFrequency = 'weekly' | 'biweekly' | 'monthly';
+
+export interface IEmployeeProfile {
+  employeeCode?:  string;        // auto-generated e.g. "EMP-00001"
+  jobTitle?:      string;
+  department?:    string;
+  salary?:        number;        // base pay per pay period
+  payFrequency?:  PayFrequency;
+  hireDate?:      Date;
+  bankDetails?:   IBankingDetails;
+  taxId?:         string;        // TIN
+  pensionId?:     string;        // PFA / RSA number
+  emergencyContactName?:  string;
+  emergencyContactPhone?: string;
+}
+
+// ─── Payroll Preferences ────────────────────────────────────────────────────
+// Business-wide statutory deduction settings — applied to every employee's
+// payslip when a payroll run is created. Nigeria-specific (PAYE bands, Pension
+// Reform Act, National Housing Fund).
+
+export interface IPayrollPreferences {
+  payeEnabled:          boolean;  // Nigeria's progressive tax bands — no rate to set, it's law
+  pensionEnabled:       boolean;
+  pensionEmployeeRate:  number;   // % of gross salary, statutory minimum is 8
+  nhfEnabled:            boolean;
+  nhfEmployeeRate:       number;  // % of gross salary, statutory rate is 2.5
+}
+
+export const DEFAULT_PAYROLL_PREFERENCES: IPayrollPreferences = {
+  payeEnabled:         true,
+  pensionEnabled:      true,
+  pensionEmployeeRate: 8,
+  nhfEnabled:           true,
+  nhfEmployeeRate:      2.5,
+};
+
 export interface IAppPreferences {
   theme?: 'light' | 'dark' | 'system';
   language?: string;         // e.g. "en", "fr"
@@ -69,6 +112,7 @@ export interface IAppPreferences {
 export interface ISettings {
   companyProfile?: ICompanyProfile;
   appPreferences?: IAppPreferences;
+  payrollPreferences?: IPayrollPreferences;
 }
 
 // ─── User Role ────────────────────────────────────────────────────────────────
@@ -104,6 +148,7 @@ export interface IUser extends Document {
   ownerId?: string;          // set for saleskeepers — points to the business owner's userId
   avatarUrl?: string;        // user profile avatar
   lastActiveAt?: Date;       // updated (throttled) on authenticated requests — see authMiddleware
+  employeeProfile?: IEmployeeProfile;  // payroll info — only set for staff accounts
   comparePassword(candidatePassword: string): Promise<boolean>;
   compareOtp(candidateOtp: string): Promise<boolean>;
 }
@@ -184,10 +229,39 @@ const AppPreferencesSchema = new Schema<IAppPreferences>(
   { _id: false }
 );
 
+const PayrollPreferencesSchema = new Schema<IPayrollPreferences>(
+  {
+    payeEnabled:         { type: Boolean, default: true },
+    pensionEnabled:      { type: Boolean, default: true },
+    pensionEmployeeRate: { type: Number, default: 8, min: 0, max: 100 },
+    nhfEnabled:           { type: Boolean, default: true },
+    nhfEmployeeRate:      { type: Number, default: 2.5, min: 0, max: 100 },
+  },
+  { _id: false }
+);
+
 const SettingsSchema = new Schema<ISettings>(
   {
-    companyProfile:  { type: CompanyProfileSchema },
-    appPreferences:  { type: AppPreferencesSchema },
+    companyProfile:      { type: CompanyProfileSchema },
+    appPreferences:      { type: AppPreferencesSchema },
+    payrollPreferences:  { type: PayrollPreferencesSchema },
+  },
+  { _id: false }
+);
+
+const EmployeeProfileSchema = new Schema<IEmployeeProfile>(
+  {
+    employeeCode: { type: String, trim: true },
+    jobTitle:     { type: String, trim: true },
+    department:   { type: String, trim: true },
+    salary:       { type: Number, min: 0 },
+    payFrequency: { type: String, enum: ['weekly', 'biweekly', 'monthly'] },
+    hireDate:     { type: Date },
+    bankDetails:  { type: BankingDetailsSchema },
+    taxId:        { type: String, trim: true },
+    pensionId:    { type: String, trim: true },
+    emergencyContactName:  { type: String, trim: true },
+    emergencyContactPhone: { type: String, trim: true },
   },
   { _id: false }
 );
@@ -216,6 +290,7 @@ const UserSchema = new Schema<IUser>(
     otp:              { type: String },           // bcrypt-hashed OTP
     otpExpiresAt:     { type: Date },
     lastActiveAt:     { type: Date },
+    employeeProfile:  { type: EmployeeProfileSchema },
     settings: { type: SettingsSchema, default: () => ({}) },
     subscription: { type: SubscriptionSchema, default: () => ({ plan: 'free', status: 'active', aiQueriesUsedToday: 0 }) },
   },
@@ -238,6 +313,17 @@ UserSchema.pre<IUser>('save', async function (next) {
 
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
+  next();
+});
+
+// Auto-generate an employee code the first time a staff member is given payroll
+// data (salary set) — not just for being staff, since not every staff member
+// is necessarily run through payroll.
+UserSchema.pre<IUser>('save', async function (next) {
+  if (this.employeeProfile?.salary && !this.employeeProfile.employeeCode) {
+    const count = await mongoose.model('User').countDocuments({ 'employeeProfile.employeeCode': { $exists: true } });
+    this.employeeProfile.employeeCode = `EMP-${String(count + 1).padStart(5, '0')}`;
+  }
   next();
 });
 

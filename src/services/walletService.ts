@@ -8,6 +8,33 @@ import {createTransaction, verifyTransaction} from '../utils/paystackService';
 import { APP_FRONTEND } from '../config/config';
 import { ITransaction, Transaction } from '../models/transaction.model';
 import { transferFunds } from '../utils/paystackService';
+import emailService from './EmailService';
+import activityLogService from './activityLogService';
+
+async function notifyWalletFunded(
+  userId: string,
+  amountKobo: number,
+  newBalanceKobo: number,
+  reference: string,
+  source: 'automatic' | 'manual'
+) {
+  try {
+    const user = await User.findById(userId).select('email firstName');
+    if (!user?.email) return;
+    await emailService.sendWalletFunded({
+      to:         user.email,
+      firstName:  user.firstName,
+      amount:     amountKobo / 100,
+      newBalance: newBalanceKobo / 100,
+      reference,
+      source,
+      fundedAt:   new Date(),
+    });
+  } catch (error) {
+    console.error('[Email] Wallet funded notification failed:', error);
+  }
+}
+
 class WalletService {
     async createWallet(user_id: string) {
         try {
@@ -206,10 +233,59 @@ class WalletService {
             balance_after: wallet.balance,
         });
 
+        // Fire-and-forget — never let a slow/failed email delay the webhook response
+        notifyWalletFunded(user_id, amount, wallet.balance, trans_ref, 'automatic');
+
         return { balance: wallet.balance / 100 };
     } catch (error) {
         throw error;
     }
+    }
+
+    /**
+     * Admin-triggered wallet credit — no payment provider involved (comps,
+     * refund corrections, offline top-ups). Mirrors finalizeDeposit's ledger
+     * behavior but is explicitly logged as a manual action.
+     */
+    async manualCredit(userId: string, amountKobo: number, note: string | undefined, actorId: string) {
+        const wallet = await Wallet.findOneAndUpdate(
+            { user_id: userId },
+            { $inc: { balance: amountKobo } },
+            { new: true }
+        );
+        if (!wallet) {
+            throw new ApiError(404, 'Wallet not found');
+        }
+
+        const balanceAfter  = wallet.balance;
+        const balanceBefore = balanceAfter - amountKobo;
+        const reference = generateTransactionRef();
+
+        await WalletLedger.create({
+            wallet_id: wallet._id,
+            type: 'credit',
+            amount: amountKobo,
+            reference,
+            description: note ? `Manual credit — ${note}` : 'Manual credit by admin',
+            balance_before: balanceBefore,
+            balance_after: balanceAfter,
+        });
+
+        const actor = await User.findById(actorId).select('firstName lastName role');
+        await activityLogService.log({
+            businessOwnerId: userId,
+            actorId,
+            actorName: actor ? `${actor.firstName} ${actor.lastName}`.trim() : 'Admin',
+            actorRole: actor?.role ?? 'admin',
+            action: 'wallet.manual_credit',
+            description: `Manually credited wallet with ₦${(amountKobo / 100).toLocaleString('en-NG')}${note ? ` — ${note}` : ''}`,
+            resourceId: wallet._id.toString(),
+            amount: amountKobo / 100,
+        });
+
+        notifyWalletFunded(userId, amountKobo, balanceAfter, reference, 'manual');
+
+        return { balance: balanceAfter / 100, reference };
     }
 
 //     async withdraw(user_id: string, amount: number) {

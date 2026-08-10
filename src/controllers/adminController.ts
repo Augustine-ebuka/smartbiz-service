@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { User } from '../models/user.model';
 import subscriptionService from '../services/subscriptionService';
+import walletService from '../services/walletService';
 import activityLogService from '../services/activityLogService';
 import { PLANS, PlanId } from '../config/subscription.config';
 
@@ -290,6 +291,46 @@ class AdminController {
         success: true,
         message: `Subscription updated for ${targetUser.email}.`,
         data: info,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /api/admin/users/:id/wallet/credit
+   * Manually credits a user's wallet — no payment provider involved (comps,
+   * refund corrections, offline top-ups). Sends the same "wallet funded"
+   * email as an automatic deposit, tagged as a manual credit.
+   * Body: { amount: number (naira), note?: string }
+   */
+  async creditWallet(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id: userId } = req.params;
+      const { amount, note } = req.body as { amount?: number; note?: string };
+
+      if (typeof amount !== 'number' || amount <= 0) {
+        res.status(400).json({ success: false, message: 'amount must be a positive number (in naira).' });
+        return;
+      }
+
+      const targetUser = await User.findById(userId).select('email');
+      if (!targetUser) {
+        res.status(404).json({ success: false, message: 'User not found.' });
+        return;
+      }
+
+      const { balance, reference } = await walletService.manualCredit(
+        userId,
+        Math.round(amount * 100),
+        note,
+        req.userId as string
+      );
+
+      res.status(200).json({
+        success: true,
+        message: `₦${amount.toLocaleString('en-NG')} credited to ${targetUser.email}'s wallet.`,
+        data: { userId, amount, newBalance: balance, reference },
       });
     } catch (error) {
       next(error);

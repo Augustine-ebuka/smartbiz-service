@@ -24,27 +24,29 @@ export interface VendorFilters {
   name?: string;
 }
 
-export const createVendor = (input: CreateVendorInput) => VendorModel.create(input);
+export const createVendor = (userId: string, input: CreateVendorInput) =>
+  VendorModel.create({ userId, ...input });
 
-export const listVendors = (filters: VendorFilters = {}) => {
-  const query: FilterQuery<VendorDocument> = {};
+export const listVendors = (userId: string, filters: VendorFilters = {}) => {
+  const query: FilterQuery<VendorDocument> = { userId };
   if (filters.category) query.category = filters.category;
   if (filters.name) query.name = new RegExp(filters.name, 'i');
 
   return VendorModel.find(query).sort({ name: 1 });
 };
 
-export const getVendorById = async (id: string): Promise<VendorDocument> => {
-  const vendor = await VendorModel.findById(id);
+export const getVendorById = async (userId: string, id: string): Promise<VendorDocument> => {
+  const vendor = await VendorModel.findOne({ _id: id, userId });
   if (!vendor) throw new NotFoundError('Vendor not found');
   return vendor;
 };
 
 export const updateVendor = async (
+  userId: string,
   id: string,
   updates: UpdateVendorInput,
 ): Promise<VendorDocument> => {
-  const vendor = await VendorModel.findByIdAndUpdate(id, updates, {
+  const vendor = await VendorModel.findOneAndUpdate({ _id: id, userId }, updates, {
     new: true,
     runValidators: true,
   });
@@ -52,7 +54,7 @@ export const updateVendor = async (
   return vendor;
 };
 
-export const deleteVendor = async (id: string): Promise<void> => {
-  const vendor = await VendorModel.findByIdAndDelete(id);
+export const deleteVendor = async (userId: string, id: string): Promise<void> => {
+  const vendor = await VendorModel.findOneAndDelete({ _id: id, userId });
   if (!vendor) throw new NotFoundError('Vendor not found');
 };

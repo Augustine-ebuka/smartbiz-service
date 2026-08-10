@@ -74,7 +74,8 @@ async function recordIncome(
   userId: string,
   income: PendingIncomeCustomerConfirmation['income'],
   customerId?: string,
-  fallbackNote?: string
+  fallbackNote?: string,
+  actorId?: string
 ) {
   const product = await findProductByName(userId, income.productName || income.category);
   return IncomeService.create(userId, {
@@ -84,7 +85,7 @@ async function recordIncome(
     amount: income.amount,
     paymentMethod: income.paymentMethod && income.paymentMethod !== 'Unknown' ? (income.paymentMethod as any) : undefined,
     note: fallbackNote ?? (!product && income.category ? income.category : undefined),
-  });
+  }, actorId);
 }
 
 async function recordDebt(userId: string, debt: PendingDebtCustomerConfirmation['debt'], customerId: string) {
@@ -156,6 +157,7 @@ function summaryLeadIn(period?: string, date?: string): string {
 router.post('/chat/entry', async (req, res) => {
   try {
     const userId = (req as any).businessOwnerId as string;
+    const actorId = req.userId as string;
     const { message } = req.body;
     // Prior turns of this SAME in-progress transaction, echoed back by the client.
     // Cap it so a runaway thread can't blow up the prompt.
@@ -194,7 +196,7 @@ router.post('/chat/entry', async (req, res) => {
       if (pending.context === 'income') {
         if (isYes) {
           const customer = await Customer.create({ userId, name: pending.customerName });
-          const income = await recordIncome(userId, pending.income, customer._id.toString());
+          const income = await recordIncome(userId, pending.income, customer._id.toString(), undefined, actorId);
           res.json({
             success: true,
             actionExecuted: 'ADD_INCOME',
@@ -205,7 +207,7 @@ router.post('/chat/entry', async (req, res) => {
           return;
         }
 
-        const income = await recordIncome(userId, pending.income, undefined, `Customer: ${pending.customerName}`);
+        const income = await recordIncome(userId, pending.income, undefined, `Customer: ${pending.customerName}`, actorId);
         res.json({
           success: true,
           actionExecuted: 'ADD_INCOME',
@@ -299,7 +301,7 @@ router.post('/chat/entry', async (req, res) => {
           category: payload.category,
           quantity: payload.quantity,
           paymentMethod: payload.paymentMethod,
-        }, existingCustomer._id.toString());
+        }, existingCustomer._id.toString(), undefined, actorId);
         res.json({ success: true, actionExecuted: actionType, reply: replyToUser, data: income, history: [] });
         return;
       }
@@ -315,7 +317,7 @@ router.post('/chat/entry', async (req, res) => {
           categoryId: categoryId?.toString(),
           vendor: payload.vendor,
           note: payload.paymentMethod && payload.paymentMethod !== 'Unknown' ? `Paid via ${payload.paymentMethod}` : undefined,
-        });
+        }, actorId);
         res.json({ success: true, actionExecuted: actionType, reply: replyToUser, data: expense, history: [] });
         return;
       }
@@ -333,7 +335,7 @@ router.post('/chat/entry', async (req, res) => {
         const { product: updatedProduct, isLowStock } = await inventoryService.adjustStock(userId, product._id.toString(), {
           quantity: payload.quantity,
           movementType: payload.operation === 'INCREASE' ? 'restock' : 'adjustment',
-        });
+        }, actorId);
         res.json({ success: true, actionExecuted: actionType, reply: replyToUser, data: updatedProduct, isLowStock, history: [] });
         return;
       }

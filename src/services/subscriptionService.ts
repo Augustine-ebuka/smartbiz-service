@@ -156,7 +156,7 @@ class SubscriptionService {
    */
   async checkLimit(
     userId: string,
-    feature: 'income' | 'expense' | 'customers' | 'products' | 'bulk_import' | 'full_reports' | 'saleskeeper'
+    feature: 'income' | 'expense' | 'customers' | 'products' | 'invoices' | 'vendors' | 'bulk_import' | 'full_reports' | 'saleskeeper'
   ): Promise<void> {
     const user = await User.findById(userId).select('subscription');
     if (!user) throw new Error('User not found.');
@@ -206,6 +206,26 @@ class SubscriptionService {
         const count = await Product.countDocuments({ userId });
         if (count >= limits.products) {
           throw new Error(`Free plan limit: ${limits.products} products. Upgrade to Pro for unlimited.`);
+        }
+        break;
+      }
+
+      case 'invoices': {
+        if (limits.invoices === -1) return;
+        const { Invoice } = await import('../models/invoice.model');
+        const count = await Invoice.countDocuments({ userId });
+        if (count >= limits.invoices) {
+          throw new Error(`Free plan limit: ${limits.invoices} invoice${limits.invoices === 1 ? '' : 's'}. Upgrade to Pro for unlimited.`);
+        }
+        break;
+      }
+
+      case 'vendors': {
+        if (limits.vendors === -1) return;
+        const { VendorModel } = await import('../models/vendor.model');
+        const count = await VendorModel.countDocuments({ userId });
+        if (count >= limits.vendors) {
+          throw new Error(`Free plan limit: ${limits.vendors} vendor${limits.vendors === 1 ? '' : 's'}. Upgrade to Pro for unlimited.`);
         }
         break;
       }

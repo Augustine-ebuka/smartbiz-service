@@ -7,6 +7,7 @@ export interface VendorBankDetails {
 }
 
 export interface VendorDocument extends Document {
+  userId: string;       // business owner this vendor belongs to
   name: string;
   contactPerson?: string;
   category?: string;
@@ -33,6 +34,7 @@ const bankDetailsSchema = new Schema<VendorBankDetails>(
 
 const vendorSchema = new Schema<VendorDocument>(
   {
+    userId: { type: String, required: true, index: true },
     name: { type: String, required: true, trim: true },
     contactPerson: { type: String, trim: true },
     category: { type: String, trim: true },

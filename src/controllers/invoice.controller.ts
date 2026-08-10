@@ -58,7 +58,7 @@ class InvoiceController {
         return;
       }
 
-      const invoice = await InvoiceService.create(userId, payload);
+      const invoice = await InvoiceService.create(userId, payload, req.userId as string);
       res.status(201).json({ success: true, message: 'Invoice created.', data: invoice });
     } catch (error) { next(error); }
   }
@@ -85,7 +85,7 @@ class InvoiceController {
     try {
       const userId  = req.businessOwnerId as string;
       const payload = normalizeInvoicePayload(req.body);
-      const invoice = await InvoiceService.update(userId, req.params.id, payload);
+      const invoice = await InvoiceService.update(userId, req.params.id, payload, req.userId as string);
       res.status(200).json({ success: true, message: 'Invoice updated.', data: invoice });
     } catch (error) { next(error); }
   }
@@ -93,7 +93,7 @@ class InvoiceController {
   async markAsPaid(req: Request, res: Response, next: NextFunction) {
     try {
       const userId  = req.businessOwnerId as string;
-      const invoice = await InvoiceService.markAsPaid(userId, req.params.id);
+      const invoice = await InvoiceService.markAsPaid(userId, req.params.id, req.userId as string);
       res.status(200).json({ success: true, message: 'Invoice marked as paid.', data: invoice });
     } catch (error) { next(error); }
   }
@@ -101,7 +101,7 @@ class InvoiceController {
   async markAsSent(req: Request, res: Response, next: NextFunction) {
     try {
       const userId  = req.businessOwnerId as string;
-      const invoice = await InvoiceService.markAsSent(userId, req.params.id);
+      const invoice = await InvoiceService.markAsSent(userId, req.params.id, req.userId as string);
       res.status(200).json({ success: true, message: 'Invoice marked as sent.', data: invoice });
     } catch (error) { next(error); }
   }
@@ -109,7 +109,7 @@ class InvoiceController {
   async cancel(req: Request, res: Response, next: NextFunction) {
     try {
       const userId  = req.businessOwnerId as string;
-      const invoice = await InvoiceService.cancel(userId, req.params.id);
+      const invoice = await InvoiceService.cancel(userId, req.params.id, req.userId as string);
       res.status(200).json({ success: true, message: 'Invoice cancelled.', data: invoice });
     } catch (error) { next(error); }
   }
@@ -117,7 +117,7 @@ class InvoiceController {
   async delete(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = req.businessOwnerId as string;
-      await InvoiceService.delete(userId, req.params.id);
+      await InvoiceService.delete(userId, req.params.id, req.userId as string);
       res.status(200).json({ success: true, message: 'Invoice deleted.' });
     } catch (error) { next(error); }
   }

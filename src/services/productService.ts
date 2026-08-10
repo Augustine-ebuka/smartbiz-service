@@ -2,6 +2,16 @@ import { AnyAaaaRecord } from 'node:dns';
 import { Product, IProduct, ProductType } from '../models/product.model';
 import { User } from '../models/user.model';
 import ApiError from '../utils/ApiError';
+import activityLogService from './activityLogService';
+
+async function getActorInfo(userId: string): Promise<{ actorName: string; actorRole: string }> {
+  const actor = await User.findById(userId).select('firstName lastName role');
+  return {
+    actorName: actor ? `${actor.firstName} ${actor.lastName}`.trim() : 'Unknown',
+    actorRole: actor?.role ?? 'unknown',
+  };
+}
+
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
 export interface CreateProductDTO {
@@ -18,16 +28,31 @@ export type UpdateProductDTO = Partial<CreateProductDTO>;
 
 class ProductService {
 
-  async create(userId: string, payload: CreateProductDTO): Promise<IProduct> {
+  async create(userId: string, payload: CreateProductDTO, actorId?: string): Promise<IProduct> {
     const product = new Product({ userId, ...payload });
+    let saved: IProduct;
     try {
-      return await product.save();
+      saved = await product.save();
     } catch (error: any) {
       if (error?.code === 11000 && error?.keyPattern?.barcode) {
         throw new ApiError(409, `A product with barcode "${payload.barcode}" already exists.`);
       }
       throw error;
     }
+
+    const { actorName, actorRole } = await getActorInfo(actorId ?? userId);
+    await activityLogService.log({
+      businessOwnerId: userId,
+      actorId: actorId ?? userId,
+      actorName,
+      actorRole,
+      action: 'product.create',
+      description: `Product "${saved.name}" created`,
+      resourceId: saved._id,
+      amount: saved.price,
+    });
+
+    return saved;
   }
 
   async getAll(
@@ -70,7 +95,7 @@ class ProductService {
     return product;
   }
 
-  async update(userId: string, productId: string, payload: UpdateProductDTO): Promise<IProduct> {
+  async update(userId: string, productId: string, payload: UpdateProductDTO, actorId?: string): Promise<IProduct> {
     let product;
     try {
       product = await Product.findOneAndUpdate(
@@ -85,12 +110,37 @@ class ProductService {
       throw error;
     }
     if (!product) throw new Error('Product not found.');
+
+    const { actorName, actorRole } = await getActorInfo(actorId ?? userId);
+    await activityLogService.log({
+      businessOwnerId: userId,
+      actorId: actorId ?? userId,
+      actorName,
+      actorRole,
+      action: 'product.update',
+      description: `Product "${product.name}" updated`,
+      resourceId: product._id,
+      amount: product.price,
+    });
+
     return product;
   }
 
-  async delete(userId: string, productId: string): Promise<void> {
+  async delete(userId: string, productId: string, actorId?: string): Promise<void> {
     const result = await Product.findOneAndDelete({ _id: productId, userId });
     if (!result) throw new Error('Product not found.');
+
+    const { actorName, actorRole } = await getActorInfo(actorId ?? userId);
+    await activityLogService.log({
+      businessOwnerId: userId,
+      actorId: actorId ?? userId,
+      actorName,
+      actorRole,
+      action: 'product.delete',
+      description: `Product "${result.name}" deleted`,
+      resourceId: productId,
+      amount: result.price,
+    });
   }
 
   // public product of a business ownwer

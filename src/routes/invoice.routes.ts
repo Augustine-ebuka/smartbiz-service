@@ -19,10 +19,9 @@ router.use(authenticateToken, resolveBusinessOwner);
 // PATCH  /api/v1/invoices/:id/cancel            → cancel invoice
 // DELETE /api/v1/invoices/:id                    → delete invoice
 
-// subscriptionMiddleware('invoice'), InvoiceController.create);
 router.get   ('/summary',          InvoiceController.getSummary);
 router.get   ('/',                  InvoiceController.getAll);
-router.post  ('/',                  InvoiceController.create);
+router.post  ('/', checkSubscription('invoices'), InvoiceController.create);
 router.get   ('/:id',              InvoiceController.getById);
 router.patch ('/:id',              InvoiceController.update);
 router.patch ('/:id/mark-paid',    InvoiceController.markAsPaid);

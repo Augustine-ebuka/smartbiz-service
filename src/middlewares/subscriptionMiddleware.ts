@@ -6,6 +6,8 @@ type SubscriptionFeature =
   | 'expense'
   | 'customers'
   | 'products'
+  | 'invoices'
+  | 'vendors'
   | 'bulk_import'
   | 'full_reports'
   | 'saleskeeper'

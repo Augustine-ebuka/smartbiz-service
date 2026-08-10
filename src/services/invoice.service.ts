@@ -1,5 +1,15 @@
 import { Invoice, IInvoice, ILineItem, InvoiceStatus, DiscountType, RecurringInterval } from '../models/invoice.model';
+import { User } from '../models/user.model';
 import ApiError from '../utils/ApiError';
+import activityLogService from './activityLogService';
+
+async function getActorInfo(userId: string): Promise<{ actorName: string; actorRole: string }> {
+  const actor = await User.findById(userId).select('firstName lastName role');
+  return {
+    actorName: actor ? `${actor.firstName} ${actor.lastName}`.trim() : 'Unknown',
+    actorRole: actor?.role ?? 'unknown',
+  };
+}
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -81,7 +91,7 @@ function nextRecurringDate(interval: RecurringInterval, from: Date): Date {
 
 class InvoiceService {
 
-  async create(userId: string, payload: CreateInvoiceDTO): Promise<IInvoice> {
+  async create(userId: string, payload: CreateInvoiceDTO, actorId?: string): Promise<IInvoice> {
     if (!payload.lineItems || payload.lineItems.length === 0) {
       throw new Error('At least one line item is required.');
     }
@@ -140,14 +150,29 @@ class InvoiceService {
       recurring,
     });
 
+    let saved: IInvoice;
     try {
-      return await invoice.save();
+      saved = await invoice.save();
     } catch (error: any) {
       if (error?.name === 'ValidationError') {
         throw new ApiError(400, error.message);
       }
       throw error;
     }
+
+    const { actorName, actorRole } = await getActorInfo(actorId ?? userId);
+    await activityLogService.log({
+      businessOwnerId: userId,
+      actorId: actorId ?? userId,
+      actorName,
+      actorRole,
+      action: 'invoice.create',
+      description: `Invoice ${saved.invoiceNumber} created for ${saved.customerName}`,
+      resourceId: saved._id,
+      amount: saved.total,
+    });
+
+    return saved;
   }
 
   async getAll(
@@ -199,7 +224,7 @@ class InvoiceService {
     return invoice;
   }
 
-  async update(userId: string, invoiceId: string, payload: UpdateInvoiceDTO): Promise<IInvoice> {
+  async update(userId: string, invoiceId: string, payload: UpdateInvoiceDTO, actorId?: string): Promise<IInvoice> {
     const invoice = await Invoice.findOne({ _id: invoiceId, userId });
     if (!invoice) throw new Error('Invoice not found.');
 
@@ -268,43 +293,110 @@ class InvoiceService {
     }
 
     if (!updated) throw new Error('Invoice not found.');
+
+    const { actorName, actorRole } = await getActorInfo(actorId ?? userId);
+    await activityLogService.log({
+      businessOwnerId: userId,
+      actorId: actorId ?? userId,
+      actorName,
+      actorRole,
+      action: 'invoice.update',
+      description: `Invoice ${updated.invoiceNumber} updated`,
+      resourceId: updated._id,
+      amount: updated.total,
+    });
+
     return updated;
   }
 
-  async markAsPaid(userId: string, invoiceId: string): Promise<IInvoice> {
+  async markAsPaid(userId: string, invoiceId: string, actorId?: string): Promise<IInvoice> {
     const invoice = await Invoice.findOne({ _id: invoiceId, userId });
     if (!invoice) throw new Error('Invoice not found.');
     if (invoice.status === 'paid') throw new Error('Invoice is already marked as paid.');
 
     invoice.status = 'paid';
     invoice.paidAt = new Date();
-    return invoice.save();
+    const saved = await invoice.save();
+
+    const { actorName, actorRole } = await getActorInfo(actorId ?? userId);
+    await activityLogService.log({
+      businessOwnerId: userId,
+      actorId: actorId ?? userId,
+      actorName,
+      actorRole,
+      action: 'invoice.mark_paid',
+      description: `Invoice ${saved.invoiceNumber} marked as paid`,
+      resourceId: saved._id,
+      amount: saved.total,
+    });
+
+    return saved;
   }
 
-  async markAsSent(userId: string, invoiceId: string): Promise<IInvoice> {
+  async markAsSent(userId: string, invoiceId: string, actorId?: string): Promise<IInvoice> {
     const invoice = await Invoice.findOne({ _id: invoiceId, userId });
     if (!invoice) throw new Error('Invoice not found.');
     if (invoice.status !== 'draft') throw new Error('Only draft invoices can be marked as sent.');
 
     invoice.status = 'sent';
-    return invoice.save();
+    const saved = await invoice.save();
+
+    const { actorName, actorRole } = await getActorInfo(actorId ?? userId);
+    await activityLogService.log({
+      businessOwnerId: userId,
+      actorId: actorId ?? userId,
+      actorName,
+      actorRole,
+      action: 'invoice.mark_sent',
+      description: `Invoice ${saved.invoiceNumber} marked as sent`,
+      resourceId: saved._id,
+      amount: saved.total,
+    });
+
+    return saved;
   }
 
-  async cancel(userId: string, invoiceId: string): Promise<IInvoice> {
+  async cancel(userId: string, invoiceId: string, actorId?: string): Promise<IInvoice> {
     const invoice = await Invoice.findOne({ _id: invoiceId, userId });
     if (!invoice) throw new Error('Invoice not found.');
     if (invoice.status === 'paid') throw new Error('Cannot cancel a paid invoice.');
 
     invoice.status = 'cancelled';
-    return invoice.save();
+    const saved = await invoice.save();
+
+    const { actorName, actorRole } = await getActorInfo(actorId ?? userId);
+    await activityLogService.log({
+      businessOwnerId: userId,
+      actorId: actorId ?? userId,
+      actorName,
+      actorRole,
+      action: 'invoice.cancel',
+      description: `Invoice ${saved.invoiceNumber} cancelled`,
+      resourceId: saved._id,
+      amount: saved.total,
+    });
+
+    return saved;
   }
 
-  async delete(userId: string, invoiceId: string): Promise<void> {
+  async delete(userId: string, invoiceId: string, actorId?: string): Promise<void> {
     const invoice = await Invoice.findOne({ _id: invoiceId, userId });
     if (!invoice) throw new Error('Invoice not found.');
     if (invoice.status === 'paid') throw new Error('Cannot delete a paid invoice.');
 
     await Invoice.findByIdAndDelete(invoiceId);
+
+    const { actorName, actorRole } = await getActorInfo(actorId ?? userId);
+    await activityLogService.log({
+      businessOwnerId: userId,
+      actorId: actorId ?? userId,
+      actorName,
+      actorRole,
+      action: 'invoice.delete',
+      description: `Invoice ${invoice.invoiceNumber} deleted`,
+      resourceId: invoiceId,
+      amount: invoice.total,
+    });
   }
 
   /**

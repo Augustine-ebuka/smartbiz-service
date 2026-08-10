@@ -61,7 +61,7 @@ export interface PaginatedResult<T> {
 
 class ExpenseService {
 
-  async create(userId: string, payload: CreateExpenseDTO): Promise<IExpense> {
+  async create(userId: string, payload: CreateExpenseDTO, actorId?: string): Promise<IExpense> {
     // Validate categoryId belongs to this user if provided
     if (payload.categoryId) {
       const category = await ExpenseCategory.findOne({ _id: payload.categoryId });
@@ -76,10 +76,10 @@ class ExpenseService {
     const saved = await expense.save();
 
     // activity log — after save, so a failed create never logs a false "created" entry
-    const { actorName, actorRole } = await getActorInfo(userId);
+    const { actorName, actorRole } = await getActorInfo(actorId ?? userId);
     await activityLogService.log({
       businessOwnerId: userId,
-      actorId: userId,
+      actorId: actorId ?? userId,
       actorName,
       actorRole,
       action: 'expense.create',
@@ -144,7 +144,7 @@ class ExpenseService {
     return expense;
   }
 
-  async update(userId: string, expenseId: string, payload: UpdateExpenseDTO): Promise<IExpense> {
+  async update(userId: string, expenseId: string, payload: UpdateExpenseDTO, actorId?: string): Promise<IExpense> {
     if (payload.categoryId) {
       const category = await ExpenseCategory.findOne({ _id: payload.categoryId, userId });
       if (!category) throw new Error('Expense category not found.');
@@ -163,10 +163,10 @@ class ExpenseService {
 
     if (!expense) throw new Error('Expense not found.');
     // activity log
-    const { actorName, actorRole } = await getActorInfo(userId);
+    const { actorName, actorRole } = await getActorInfo(actorId ?? userId);
     await activityLogService.log({
       businessOwnerId: userId,
-      actorId: userId,
+      actorId: actorId ?? userId,
       actorName,
       actorRole,
       action: 'expense.update',
@@ -177,14 +177,14 @@ class ExpenseService {
     return expense;
   }
 
-  async delete(userId: string, expenseId: string): Promise<void> {
+  async delete(userId: string, expenseId: string, actorId?: string): Promise<void> {
     const result = await Expense.findOneAndDelete({ _id: expenseId, userId });
     if (!result) throw new Error('Expense not found.');
     // activity log
-    const { actorName, actorRole } = await getActorInfo(userId);
+    const { actorName, actorRole } = await getActorInfo(actorId ?? userId);
     await activityLogService.log({
       businessOwnerId: userId,
-      actorId: userId,
+      actorId: actorId ?? userId,
       actorName,
       actorRole,
       action: 'expense.delete',

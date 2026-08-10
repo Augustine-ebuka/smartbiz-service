@@ -1,6 +1,15 @@
 import { Product } from '../models/product.model';
 import { StockHistory, StockMovementType } from '../models/stockHistory.model';
 import { User } from '../models/user.model';
+import activityLogService from './activityLogService';
+
+async function getActorInfo(userId: string): Promise<{ actorName: string; actorRole: string }> {
+  const actor = await User.findById(userId).select('firstName lastName role');
+  return {
+    actorName: actor ? `${actor.firstName} ${actor.lastName}`.trim() : 'Owner',
+    actorRole: actor?.role ?? 'unknown',
+  };
+}
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -103,26 +112,37 @@ class InventoryService {
   async adjustStock(
     userId: string,
     productId: string,
-    payload: AdjustStockDTO
+    payload: AdjustStockDTO,
+    actorId?: string
   ): Promise<{ product: any; isLowStock: boolean }> {
     const product = await Product.findOne({ _id: productId, userId });
     if (!product) throw new Error('Product not found.');
     if (!product.trackStock) throw new Error('Stock tracking is not enabled for this product.');
 
-    const actor = await User.findById(userId).select('firstName lastName');
-    const actorName = actor ? `${actor.firstName} ${actor.lastName}` : 'Owner';
+    const { actorName, actorRole } = await getActorInfo(actorId ?? userId);
 
     await this.recordMovement(userId, {
       productId,
       quantity:     payload.quantity,
       movementType: payload.movementType,
       note:         payload.note,
-      actorId:      userId,
+      actorId:      actorId ?? userId,
       actorName,
     });
 
     const updated    = await Product.findById(productId);
     const isLowStock = (updated?.stock ?? 0) <= (updated?.lowStockThreshold ?? 5);
+
+    await activityLogService.log({
+      businessOwnerId: userId,
+      actorId: actorId ?? userId,
+      actorName,
+      actorRole,
+      action: 'stock.adjust',
+      description: `${payload.movementType} of ${payload.quantity} for "${product.name}"${payload.note ? ` — ${payload.note}` : ''}`,
+      resourceId: productId,
+      metadata: { movementType: payload.movementType, quantity: payload.quantity, stockAfter: updated?.stock },
+    });
 
     return { product: updated, isLowStock };
   }
@@ -133,7 +153,8 @@ class InventoryService {
   async updateStockSettings(
     userId: string,
     productId: string,
-    payload: { trackStock?: boolean; stock?: number; lowStockThreshold?: number }
+    payload: { trackStock?: boolean; stock?: number; lowStockThreshold?: number },
+    actorId?: string
   ): Promise<any> {
     const product = await Product.findOne({ _id: productId, userId });
     if (!product) throw new Error('Product not found.');
@@ -142,11 +163,10 @@ class InventoryService {
     if (payload.trackStock          !== undefined) update.trackStock          = payload.trackStock;
     if (payload.lowStockThreshold   !== undefined) update.lowStockThreshold   = payload.lowStockThreshold;
 
+    const { actorName, actorRole } = await getActorInfo(actorId ?? userId);
+
     // If setting initial stock, write a history record
     if (payload.stock !== undefined && payload.stock !== product.stock) {
-      const actor = await User.findById(userId).select('firstName lastName');
-      const actorName = actor ? `${actor.firstName} ${actor.lastName}` : 'Owner';
-
       const stockBefore = product.stock;
       update.stock      = payload.stock;
 
@@ -162,14 +182,38 @@ class InventoryService {
         stockBefore,
         stockAfter:   payload.stock,
         note:         'Stock manually set',
-        actorId:      userId,
+        actorId:      actorId ?? userId,
         actorName,
+      });
+
+      await activityLogService.log({
+        businessOwnerId: userId,
+        actorId: actorId ?? userId,
+        actorName,
+        actorRole,
+        action: 'stock.settings_update',
+        description: `Stock settings updated for "${product.name}" (stock set to ${payload.stock})`,
+        resourceId: productId,
+        metadata: { ...payload, stockBefore },
       });
 
       return Product.findById(productId);
     }
 
-    return Product.findByIdAndUpdate(productId, { $set: update }, { new: true });
+    const updated = await Product.findByIdAndUpdate(productId, { $set: update }, { new: true });
+
+    await activityLogService.log({
+      businessOwnerId: userId,
+      actorId: actorId ?? userId,
+      actorName,
+      actorRole,
+      action: 'stock.settings_update',
+      description: `Stock settings updated for "${product.name}"`,
+      resourceId: productId,
+      metadata: payload,
+    });
+
+    return updated;
   }
 
   /**

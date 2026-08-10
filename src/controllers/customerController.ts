@@ -71,7 +71,7 @@ async getAll(req: Request, res: Response, next: NextFunction) {
 
   async delete(req: Request, res: Response, next: NextFunction) {
     try {
-      const userId = req.userId as string;
+      const userId = (req as any).businessOwnerId as string;
       await CustomerService.delete(userId, req.params.id);
       res.status(200).json({
         success: true,

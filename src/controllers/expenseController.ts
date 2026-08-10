@@ -6,7 +6,7 @@ class ExpenseController {
   async create(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req as any).businessOwnerId as string;
-      const expense = await ExpenseService.create(userId, req.body);
+      const expense = await ExpenseService.create(userId, req.body, req.userId as string);
       res.status(201).json({
         success: true,
         message: 'Expense logged successfully.',
@@ -51,7 +51,7 @@ class ExpenseController {
   async update(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req as any).businessOwnerId as string;
-      const expense = await ExpenseService.update(userId, req.params.id, req.body);
+      const expense = await ExpenseService.update(userId, req.params.id, req.body, req.userId as string);
       res.status(200).json({
         success: true,
         message: 'Expense updated successfully.',
@@ -64,8 +64,8 @@ class ExpenseController {
 
   async delete(req: Request, res: Response, next: NextFunction) {
     try {
-      const userId = req.userId as string;
-      await ExpenseService.delete(userId, req.params.id);
+      const userId = (req as any).businessOwnerId as string;
+      await ExpenseService.delete(userId, req.params.id, req.userId as string);
       res.status(200).json({
         success: true,
         message: 'Expense deleted successfully.',

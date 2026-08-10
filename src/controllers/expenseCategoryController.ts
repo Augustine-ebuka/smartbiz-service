@@ -61,7 +61,7 @@ class ExpenseCategoryController {
 
   async delete(req: Request, res: Response, next: NextFunction) {
     try {
-      const userId = req.userId as string;
+      const userId = (req as any).businessOwnerId as string;
       await ExpenseCategoryService.delete(userId, req.params.id);
       res.status(200).json({
         success: true,

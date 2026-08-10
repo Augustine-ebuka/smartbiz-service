@@ -1,7 +1,10 @@
 import crypto from 'crypto';
 import { Invite, IInvite } from '../models/invite.model';
-import { User } from '../models/user.model';
+import { User, IEmployeeProfile } from '../models/user.model';
 import emailService from './EmailService';
+import activityLogService from './activityLogService';
+
+export type UpdateEmployeeProfileDTO = Partial<IEmployeeProfile>;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -140,6 +143,50 @@ class SaleskeeperService {
 
     invite.status = 'accepted';
     return invite.save();
+  }
+
+  /**
+   * Set/update payroll info on a saleskeeper's account. Same `:id` (the Invite
+   * _id) used by revoke/reinstate/remove, resolved to the underlying staff
+   * User — payroll data lives on the User doc, not the Invite.
+   */
+  async updateEmployeeProfile(ownerId: string, inviteId: string, payload: UpdateEmployeeProfileDTO) {
+    const invite = await Invite.findOne({ _id: inviteId, ownerId });
+    if (!invite) throw new Error('Invite not found.');
+    if (!invite.inviteeUserId) throw new Error('This invite has no linked account yet.');
+
+    const staff = await User.findOne({ _id: invite.inviteeUserId, ownerId, role: 'staff' });
+    if (!staff) throw new Error('Saleskeeper account not found.');
+
+    // Plain object assign (not $set) so this goes through .save() and the
+    // employeeCode auto-generation hook runs.
+    staff.employeeProfile = { ...(staff.employeeProfile ?? {}), ...payload } as any;
+    const saved = await staff.save();
+
+    const owner = await User.findById(ownerId).select('firstName lastName role');
+    await activityLogService.log({
+      businessOwnerId: ownerId,
+      actorId: ownerId,
+      actorName: owner ? `${owner.firstName} ${owner.lastName}`.trim() : 'Unknown',
+      actorRole: owner?.role ?? 'unknown',
+      action: 'employee.profile_update',
+      description: `Employee profile updated for ${saved.firstName} ${saved.lastName}`,
+      resourceId: saved._id,
+    });
+
+    return saved;
+  }
+
+  async getEmployeeProfile(ownerId: string, inviteId: string) {
+    const invite = await Invite.findOne({ _id: inviteId, ownerId });
+    if (!invite) throw new Error('Invite not found.');
+    if (!invite.inviteeUserId) throw new Error('This invite has no linked account yet.');
+
+    const staff = await User.findOne({ _id: invite.inviteeUserId, ownerId, role: 'staff' })
+      .select('firstName lastName email employeeProfile');
+    if (!staff) throw new Error('Saleskeeper account not found.');
+
+    return staff;
   }
 
   /**

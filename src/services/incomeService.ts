@@ -3,6 +3,15 @@ import { Product } from '../models/product.model';
 import { Customer } from '../models/customer.model';
 import { User } from '../models/user.model';
 import inventoryService from './inventory.service';
+import activityLogService from './activityLogService';
+
+async function getActorInfo(userId: string): Promise<{ actorName: string; actorRole: string }> {
+  const actor = await User.findById(userId).select('firstName lastName role');
+  return {
+    actorName: actor ? `${actor.firstName} ${actor.lastName}`.trim() : 'Unknown',
+    actorRole: actor?.role ?? 'unknown',
+  };
+}
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -31,7 +40,7 @@ export interface IncomeFilterDTO {
 
 class IncomeService {
 
-  async create(userId: string, payload: CreateIncomeDTO): Promise<IIncome & { inventoryWarning?: string }> {
+  async create(userId: string, payload: CreateIncomeDTO, actorId?: string): Promise<IIncome & { inventoryWarning?: string }> {
     if (payload.productId) {
       const product = await Product.findOne({ _id: payload.productId, userId });
       if (!product) throw new Error('Product not found.');
@@ -52,20 +61,18 @@ class IncomeService {
 
     await income.save();
 
+    const { actorName, actorRole } = await getActorInfo(actorId ?? userId);
+
     // ── Auto-deduct stock if product tracks inventory ──────────────────────
     let inventoryWarning: string | undefined;
 
     if (payload.productId) {
-      // Fetch actor info automatically
-      const actor = await User.findById(userId).select('firstName lastName');
-      const actorName = actor ? `${actor.firstName} ${actor.lastName}` : 'Unknown';
-
       const { isLowStock, stockAfter } = await inventoryService.deductForSale(
         userId,
         payload.productId,
         payload.unit ?? 1,
         income._id.toString(),
-        userId,
+        actorId ?? userId,
         actorName
       );
 
@@ -76,6 +83,17 @@ class IncomeService {
           : `⚠️ "${product?.name}" is running low — only ${stockAfter} left.`;
       }
     }
+
+    await activityLogService.log({
+      businessOwnerId: userId,
+      actorId: actorId ?? userId,
+      actorName,
+      actorRole,
+      action: 'income.create',
+      description: payload.note || 'Income logged',
+      resourceId: income._id,
+      amount: payload.amount,
+    });
 
     return Object.assign(income, { inventoryWarning });
   }
@@ -112,7 +130,7 @@ class IncomeService {
     return income;
   }
 
-  async update(userId: string, incomeId: string, payload: UpdateIncomeDTO): Promise<IIncome> {
+  async update(userId: string, incomeId: string, payload: UpdateIncomeDTO, actorId?: string): Promise<IIncome> {
     if (payload.productId) {
       const product = await Product.findOne({ _id: payload.productId, userId });
       if (!product) throw new Error('Product not found.');
@@ -137,12 +155,37 @@ class IncomeService {
       .populate('customerId', 'name email phone');
 
     if (!income) throw new Error('Income record not found.');
+
+    const { actorName, actorRole } = await getActorInfo(actorId ?? userId);
+    await activityLogService.log({
+      businessOwnerId: userId,
+      actorId: actorId ?? userId,
+      actorName,
+      actorRole,
+      action: 'income.update',
+      description: income.note || 'Income record updated',
+      resourceId: income._id,
+      amount: income.amount,
+    });
+
     return income;
   }
 
-  async delete(userId: string, incomeId: string): Promise<void> {
+  async delete(userId: string, incomeId: string, actorId?: string): Promise<void> {
     const result = await Income.findOneAndDelete({ _id: incomeId, userId });
     if (!result) throw new Error('Income record not found.');
+
+    const { actorName, actorRole } = await getActorInfo(actorId ?? userId);
+    await activityLogService.log({
+      businessOwnerId: userId,
+      actorId: actorId ?? userId,
+      actorName,
+      actorRole,
+      action: 'income.delete',
+      description: 'Income record deleted',
+      resourceId: incomeId,
+      amount: result.amount,
+    });
   }
 
   // ─── Summary / Analytics ──────────────────────────────────────────────────
