@@ -26,6 +26,9 @@ import supportRoute from './support.routes';
 import invoiceRoutes from './invoice.routes';
 import vendorRoute from './vendor.routes';
 import payrollRoutes from './payroll.routes';
+import taxRoutes from './tax.routes';
+
+router.use("/v1/tax", taxRoutes);
 
 router.use("/v1/auth", authRoute);
 router.use("/v1/wallet", walletRoute);

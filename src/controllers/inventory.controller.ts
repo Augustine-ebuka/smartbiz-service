@@ -10,11 +10,18 @@ class InventoryController {
   async getInventory(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req as any).businessOwnerId as string;
-      const inventory = await inventoryService.getInventory(userId);
+      const products = await inventoryService.getInventory(userId);
+
+      const summary = {
+        totalProducts:   products.length,
+        totalQuantity:   products.reduce((sum, p) => sum + p.stock, 0),
+        expectedRevenue: products.reduce((sum, p) => sum + p.stock * p.price, 0),
+      };
+
       res.status(200).json({
         success: true,
         message: 'Inventory fetched successfully.',
-        data: inventory,
+        data: { products, summary },
       });
     } catch (error) {
       next(error);

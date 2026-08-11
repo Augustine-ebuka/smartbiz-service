@@ -27,18 +27,20 @@ router.patch ('/expenses/:id',      ExpenseController.update);
 router.delete('/expenses/:id',      ExpenseController.delete);
 
 // ─── Income ───────────────────────────────────────────────────────────────────
-// POST   /api/transactions/income                → log new income
-// GET    /api/transactions/income                → list income (with optional filters)
-// GET    /api/transactions/income/summary        → totals & breakdown by method/product
-// GET    /api/transactions/income/:id            → get single income record
-// PATCH  /api/transactions/income/:id            → update income record
-// DELETE /api/transactions/income/:id            → delete income record
+// POST   /api/transactions/income                     → log new income
+// GET    /api/transactions/income                     → list income (with optional filters)
+// GET    /api/transactions/income/summary             → totals & breakdown by method/product
+// GET    /api/transactions/income/:id                 → get single income record
+// PATCH  /api/transactions/income/:id                 → update income record
+// PATCH  /api/transactions/income/:id/mark-returned    → restock + refund expense + flag returned
+// DELETE /api/transactions/income/:id                 → delete income record
 
-router.post  ('/income',            checkSubscription('income'), IncomeController.create);
-router.get   ('/income',            IncomeController.getAll);
-router.get   ('/income/summary',    IncomeController.getSummary);    // must be before /:id
-router.get   ('/income/:id',        IncomeController.getById);
-router.patch ('/income/:id',        IncomeController.update);
-router.delete('/income/:id',        IncomeController.delete);
+router.post  ('/income',                  checkSubscription('income'), IncomeController.create);
+router.get   ('/income',                  IncomeController.getAll);
+router.get   ('/income/summary',          IncomeController.getSummary);    // must be before /:id
+router.get   ('/income/:id',              IncomeController.getById);
+router.patch ('/income/:id',              IncomeController.update);
+router.patch ('/income/:id/mark-returned', IncomeController.markAsReturned);
+router.delete('/income/:id',              IncomeController.delete);
 
 export default router;

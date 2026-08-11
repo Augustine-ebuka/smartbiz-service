@@ -21,7 +21,7 @@ class IncomeController {
     try {
       const userId = (req as any).businessOwnerId as string;
       // Filter params via query string:
-      // ?productId=...&customerId=...&paymentMethod=Cash&startDate=...&endDate=...&search=...&page=1&limit=10
+      // ?productId=...&customerId=...&paymentMethod=Cash&startDate=...&endDate=...&search=...&receiptId=...&page=1&limit=10
       const result = await IncomeService.getAll(userId, req.query as any);
       res.status(200).json({
         success: true,
@@ -69,6 +69,21 @@ class IncomeController {
       res.status(200).json({
         success: true,
         message: 'Income record deleted successfully.',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async markAsReturned(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = (req as any).businessOwnerId as string;
+      const { note } = req.body as { note?: string };
+      const income = await IncomeService.markAsReturned(userId, req.params.id, req.userId as string, note);
+      res.status(200).json({
+        success: true,
+        message: 'Sale marked as returned. Stock restocked and refund expense recorded.',
+        data: income,
       });
     } catch (error) {
       next(error);

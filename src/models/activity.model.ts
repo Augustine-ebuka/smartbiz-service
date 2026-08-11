@@ -6,6 +6,7 @@ export type ActivityAction =
   | 'income.create'
   | 'income.update'
   | 'income.delete'
+  | 'income.mark_returned'
   | 'expense.create'
   | 'expense.update'
   | 'expense.delete'
