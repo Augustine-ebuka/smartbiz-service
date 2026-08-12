@@ -27,6 +27,7 @@ import invoiceRoutes from './invoice.routes';
 import vendorRoute from './vendor.routes';
 import payrollRoutes from './payroll.routes';
 import taxRoutes from './tax.routes';
+import notificationRoutes from './notification.routes';
 
 router.use("/v1/tax", taxRoutes);
 
@@ -55,6 +56,7 @@ router.use("/v1/support", supportRoute);
 router.use("/v1/invoices", invoiceRoutes);
 router.use("/v1/vendors", vendorRoute);
 router.use("/v1/payroll", payrollRoutes);
+router.use("/v1/notifications", notificationRoutes);
 
 router.get("/v1", (req, res) => {
   res.send("Welcome smart biz to Version 1 API");

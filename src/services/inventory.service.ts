@@ -2,6 +2,7 @@ import { Product } from '../models/product.model';
 import { StockHistory, StockMovementType } from '../models/stockHistory.model';
 import { User } from '../models/user.model';
 import activityLogService from './activityLogService';
+import notificationService from './notificationService';
 
 async function getActorInfo(userId: string): Promise<{ actorName: string; actorRole: string }> {
   const actor = await User.findById(userId).select('firstName lastName role');
@@ -69,6 +70,25 @@ class InventoryService {
       actorId:     dto.actorId,
       actorName:   dto.actorName,
     });
+
+    // Low-stock notification — every stock change funnels through this one
+    // method, so this is the single place to catch it rather than scattering
+    // the check across adjustStock/deductForSale/updateStockSettings.
+    // createIfNotDuplicate skips it if an unread one already exists for this
+    // product, so staying low doesn't spam a fresh notification on every sale.
+    if (stockAfter <= product.lowStockThreshold) {
+      await notificationService.createIfNotDuplicate({
+        userId,
+        type: 'low_stock',
+        severity: stockAfter === 0 ? 'critical' : 'warning',
+        title: stockAfter === 0 ? 'Out of stock' : 'Running low on stock',
+        message: stockAfter === 0
+          ? `"${product.name}" is now out of stock.`
+          : `"${product.name}" is running low — only ${stockAfter} left.`,
+        resourceType: 'product',
+        resourceId: dto.productId,
+      });
+    }
   }
 
   /**
