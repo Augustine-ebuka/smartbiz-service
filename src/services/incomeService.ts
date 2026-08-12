@@ -7,6 +7,7 @@ import { ExpenseCategory } from '../models/expenseCategory.model';
 import inventoryService from './inventory.service';
 import activityLogService from './activityLogService';
 import ApiError from '../utils/ApiError';
+import TaxService, { VAT_RATE } from './tax.service';
 
 async function getActorInfo(userId: string): Promise<{ actorName: string; actorRole: string }> {
   const actor = await User.findById(userId).select('firstName lastName role');
@@ -28,6 +29,7 @@ export interface CreateIncomeDTO {
   date?: Date | string;
   note?: string;
   vat?: boolean;
+  vatAmount?: number;
   // returned is deliberately NOT settable here — it can only be flipped via
   // markAsReturned(), which also restocks inventory and records a refund
   // expense. Allowing it through generic create/update would let a plain
@@ -51,8 +53,9 @@ export interface IncomeFilterDTO {
 class IncomeService {
 
   async create(userId: string, payload: CreateIncomeDTO, actorId?: string): Promise<IIncome & { inventoryWarning?: string }> {
+    let product = null;
     if (payload.productId) {
-      const product = await Product.findOne({ _id: payload.productId, userId });
+      product = await Product.findOne({ _id: payload.productId, userId });
       if (!product) throw new Error('Product not found.');
     }
 
@@ -66,10 +69,33 @@ class IncomeService {
     // never start out already-returned.
     const { returned: _ignoredReturned, ...safePayload } = payload as CreateIncomeDTO & { returned?: boolean };
 
+    const unit = payload.unit ?? 1;
+
+    // Auto-fill cost from the product's costPrice unless the caller explicitly
+    // passed their own costAmount (a manual override always wins). Without
+    // this, costAmount silently stays 0 and profit reporting is meaningless —
+    // recording cost once on the product beats asking for it on every sale.
+    const costAmount = payload.costAmount ?? (product?.costPrice != null ? product.costPrice * unit : 0);
+
+    // Auto-compute VAT the same way: only if this sale is flagged VAT-able
+    // AND the business is actually VAT-registered (an unregistered business
+    // can't legally charge VAT, so the flag alone isn't trusted). amount is
+    // always the full amount actually received, so the VAT portion is backed
+    // out of it: vatAmount = amount * rate / (1 + rate).
+    let vatAmount = payload.vatAmount ?? 0;
+    if (payload.vat && payload.vatAmount === undefined) {
+      const taxSettings = await TaxService.getSettings(userId);
+      if (taxSettings.vatRegistered) {
+        vatAmount = Math.round(((payload.amount * VAT_RATE) / (1 + VAT_RATE)) * 100) / 100;
+      }
+    }
+
     const income = new Income({
       userId,
       ...safePayload,
-      unit:          payload.unit ?? 1,
+      unit,
+      costAmount,
+      vatAmount,
       paymentMethod: payload.paymentMethod ?? 'Cash',
       date:          payload.date ? new Date(payload.date) : new Date(),
     });
@@ -291,10 +317,10 @@ class IncomeService {
     }
 
     const [totals, byPaymentMethod, byProduct, byCustomer] = await Promise.all([
-      // Total income
+      // Total income + cost (for gross profit — see return below)
       Income.aggregate([
         { $match: matchStage },
-        { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } },
+        { $group: { _id: null, total: { $sum: '$amount' }, totalCost: { $sum: '$costAmount' }, count: { $sum: 1 } } },
       ]),
 
       // Breakdown by payment method
@@ -317,6 +343,7 @@ class IncomeService {
           $group: {
             _id: '$productId',
             total: { $sum: '$amount' },
+            totalCost: { $sum: '$costAmount' },
             unitsSold: { $sum: '$unit' },
             count: { $sum: 1 },
           },
@@ -334,6 +361,8 @@ class IncomeService {
           $project: {
             productName: { $ifNull: ['$product.name', 'Custom / No product'] },
             total: 1,
+            totalCost: 1,
+            grossProfit: { $subtract: ['$total', '$totalCost'] },
             unitsSold: 1,
             count: 1,
           },
@@ -371,9 +400,14 @@ class IncomeService {
       ]),
     ]);
 
+    const total     = totals[0]?.total ?? 0;
+    const totalCost = totals[0]?.totalCost ?? 0;
+
     return {
-      total: totals[0]?.total ?? 0,
+      total,
       count: totals[0]?.count ?? 0,
+      totalCost,
+      grossProfit: total - totalCost,
       byPaymentMethod,
       byProduct,
       byCustomer,

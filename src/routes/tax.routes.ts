@@ -5,6 +5,11 @@ import TaxController from '../controllers/tax.controller';
 
 const router = Router();
 
+// GET   /api/tax/settings → business's saved tax profile
+// PATCH /api/tax/settings → update any subset of it
+router.get  ('/settings', authenticateToken, resolveBusinessOwner, TaxController.getSettings);
+router.patch('/settings', authenticateToken, resolveBusinessOwner, TaxController.updateSettings);
+
 // Quick PAYE estimate — public, no auth
 // GET /api/tax/estimate?grossIncome=5000000
 router.get('/estimate', TaxController.estimateManual);

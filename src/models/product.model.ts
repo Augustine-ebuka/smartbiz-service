@@ -12,6 +12,7 @@ export interface IProduct extends Document {
   name: string;
   type: ProductType;
   price: number;
+  costPrice?: number;              // what this item costs the business, per unit — for profit tracking
   description?: string;
   imageUrl?: string;
   isPublic: boolean;
@@ -33,6 +34,7 @@ const ProductSchema = new Schema<IProduct>(
     name:        { type: String, required: true, trim: true },
     type:        { type: String, required: true, enum: ['Good', 'Service'] satisfies ProductType[], default: 'Good' },
     price:       { type: Number, required: true, min: 0 },
+    costPrice:   { type: Number, min: 0 },
     description: { type: String, trim: true },
     imageUrl:      { type: String, trim: true },
     isPublic:      { type: Boolean, default: false },

@@ -18,6 +18,7 @@ export interface CreateProductDTO {
   name: string;
   type: ProductType;
   price: number;
+  costPrice?: number;
   description?: string;
   barcode?: string;
 }

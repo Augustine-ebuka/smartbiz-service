@@ -17,8 +17,11 @@ export interface ReportsData {
 
   profitAndLoss: {
     totalRevenue: number;
+    costOfGoodsSold: number;
+    grossProfit: number;             // totalRevenue - costOfGoodsSold
+    grossMargin: number;             // grossProfit / totalRevenue * 100
     totalExpenses: number;
-    netProfit: number;
+    netProfit: number;               // grossProfit - totalExpenses (i.e. revenue - COGS - expenses)
     profitMargin: number;            // netProfit / totalRevenue * 100
     expenseBreakdown: Array<{ name: string; value: number }>;
   };
@@ -28,8 +31,9 @@ export interface ReportsData {
     cashInflows: number;
     cashOutflows: number;
     endingBalance: number;
-    burnRate: number;                // avg daily expense in range
-    runway: number;                  // days until cash runs out at current burn rate
+    burnRate: number;                // avg daily expense in range (gross — unchanged meaning)
+    netBurnRate: number;             // avg daily (expense - revenue), based on elapsed days only; 0 if revenue covers spend
+    runway: number;                  // days until cash runs out at current NET burn rate; -1 = not burning (revenue covers expenses)
   };
 
   expenseReport: {
@@ -51,6 +55,8 @@ export interface ReportsData {
     productId: string;
     name: string;
     totalRevenue: number;
+    totalCost: number;
+    grossProfit: number;
     unitsSold: number;
     transactionCount: number;
     avgSellingPrice: number;
@@ -176,6 +182,7 @@ class ReportsService {
   ): Promise<ReportsData> {
     const { start, end, prevStart, prevEnd, label } = resolveRange(rangeKey, customStart, customEnd);
     const days = daysBetween(start, end);
+    const now  = new Date();
 
     const [
       // Current period
@@ -202,10 +209,10 @@ class ReportsService {
       stockHistory,
     ] = await Promise.all([
 
-      // ── Current period revenue ─────────────────────────────────────────────
+      // ── Current period revenue + cost of goods sold ────────────────────────
       Income.aggregate([
         { $match: { userId, date: { $gte: start, $lte: end } } },
-        { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } },
+        { $group: { _id: null, total: { $sum: '$amount' }, totalCost: { $sum: '$costAmount' }, count: { $sum: 1 } } },
       ]),
 
       // ── Expenses by category ───────────────────────────────────────────────
@@ -243,6 +250,7 @@ class ReportsService {
           $group: {
             _id:        '$productId',
             totalRev:   { $sum: '$amount' },
+            totalCost:  { $sum: '$costAmount' },
             unitsSold:  { $sum: '$unit' },
             txCount:    { $sum: 1 },
             avgPrice:   { $avg: '$amount' },
@@ -262,6 +270,8 @@ class ReportsService {
             productId:    '$_id',
             name:         { $ifNull: ['$product.name', 'Unknown Product'] },
             totalRevenue: '$totalRev',
+            totalCost:    1,
+            grossProfit:  { $subtract: ['$totalRev', '$totalCost'] },
             unitsSold:    1,
             transactionCount: '$txCount',
             avgSellingPrice:  { $round: ['$avgPrice', 2] },
@@ -302,13 +312,14 @@ class ReportsService {
         },
       ]),
 
-      // ── Revenue by day (for trend chart) ──────────────────────────────────
+      // ── Revenue + cost by day (for trend chart) ────────────────────────────
       Income.aggregate([
         { $match: { userId, date: { $gte: start, $lte: end } } },
         {
           $group: {
             _id:   { $dateToString: { format: '%Y-%m-%d', date: '$date', timezone: 'UTC' } },
             total: { $sum: '$amount' },
+            cost:  { $sum: '$costAmount' },
           },
         },
         { $sort: { _id: 1 } },
@@ -326,10 +337,10 @@ class ReportsService {
         { $sort: { _id: 1 } },
       ]),
 
-      // ── Previous period revenue ────────────────────────────────────────────
+      // ── Previous period revenue + cost ─────────────────────────────────────
       Income.aggregate([
         { $match: { userId, date: { $gte: prevStart, $lte: prevEnd } } },
-        { $group: { _id: null, total: { $sum: '$amount' } } },
+        { $group: { _id: null, total: { $sum: '$amount' }, totalCost: { $sum: '$costAmount' } } },
       ]),
 
       // ── Previous period expenses ───────────────────────────────────────────
@@ -370,16 +381,27 @@ class ReportsService {
 
     // ── Compute base values ───────────────────────────────────────────────────
 
-    const totalRevenue   = revenueResult[0]?.total    ?? 0;
+    // Revenue and cost of goods sold — accrual figures for P&L, not cash flow
+    // (costAmount is a memo for margin math, not a recorded cash transaction;
+    // the actual cash outflow only exists if/when that purchase is separately
+    // logged as an Expense — see the cashFlow block below, deliberately
+    // unchanged, for why COGS isn't subtracted there too).
+    const totalRevenue   = revenueResult[0]?.total     ?? 0;
+    const costOfGoodsSold = revenueResult[0]?.totalCost ?? 0;
+    const grossProfit    = totalRevenue - costOfGoodsSold;
+    const grossMargin    = totalRevenue > 0 ? Math.round((grossProfit / totalRevenue) * 1000) / 10 : 0;
+
     const totalExpenses  = expenseByCategory.reduce((s: number, c: any) => s + c.value, 0);
-    const netProfit      = totalRevenue - totalExpenses;
+    const netProfit      = grossProfit - totalExpenses;
     const profitMargin   = totalRevenue > 0 ? Math.round((netProfit / totalRevenue) * 1000) / 10 : 0;
 
-    const prevRev        = prevRevenue[0]?.total    ?? 0;
-    const prevExp        = prevExpenses[0]?.total   ?? 0;
-    const prevProfit     = prevRev - prevExp;
-    const prevTxCount    = prevTransactions[0]?.count ?? 0;
+    const prevRev        = prevRevenue[0]?.total     ?? 0;
+    const prevCost        = prevRevenue[0]?.totalCost ?? 0;
+    const prevExp         = prevExpenses[0]?.total    ?? 0;
+    const prevProfit      = (prevRev - prevCost) - prevExp;
+    const prevTxCount     = prevTransactions[0]?.count ?? 0;
 
+    // Cash flow intentionally uses totalExpenses only, not COGS — see note above.
     const beginningBalance = (allTimeIncomeBefore[0]?.total ?? 0) - (allTimeExpensesBefore[0]?.total ?? 0);
     const endingBalance    = beginningBalance + totalRevenue - totalExpenses;
 
@@ -388,7 +410,26 @@ class ReportsService {
     const avgTxValue        = transactionCount > 0 ? Math.round(totalRevenue / transactionCount) : 0;
 
     const burnRate = avgExpensePerDay;
-    const runway   = burnRate > 0 ? Math.floor(endingBalance / burnRate) : Infinity;
+
+    // Runway must be based on NET burn (expenses minus revenue, not gross
+    // expenses) — a business whose revenue covers its spend isn't burning
+    // cash at all. It must also be based on how much of the range has
+    // actually ELAPSED, not the full range length — for an in-progress
+    // period like "this-month" on day 12 of 31, dividing by 31 dilutes the
+    // real current pace. For a fully-past range (e.g. "last-month"), elapsed
+    // days naturally equals the full range, so behavior there is unchanged.
+    const elapsedEnd  = end < now ? end : now;
+    const elapsedDays = elapsedEnd > start ? daysBetween(start, elapsedEnd) : 1;
+    const netBurnRate = Math.max(0, Math.round((totalExpenses - totalRevenue) / elapsedDays));
+
+    let runway: number;
+    if (netBurnRate <= 0) {
+      runway = -1;                 // not burning — revenue covers (or exceeds) expenses
+    } else if (endingBalance <= 0) {
+      runway = 0;                  // already out of cash
+    } else {
+      runway = Math.floor(endingBalance / netBurnRate);
+    }
 
     // ── Payment method breakdown ───────────────────────────────────────────────
 
@@ -401,17 +442,19 @@ class ReportsService {
 
     // ── Day-by-day trend ──────────────────────────────────────────────────────
 
-    const revMap = new Map(revenueByDay.map((r: any) => [r._id, r.total]));
-    const expMap = new Map(expenseByDay.map((r: any)  => [r._id, r.total]));
+    const revMap  = new Map(revenueByDay.map((r: any) => [r._id, r.total]));
+    const costMap = new Map(revenueByDay.map((r: any) => [r._id, r.cost]));
+    const expMap  = new Map(expenseByDay.map((r: any)  => [r._id, r.total]));
 
     const revenueByDayArr: Array<{ date: string; revenue: number; expenses: number; profit: number }> = [];
     for (let i = 0; i < days; i++) {
       const d   = new Date(start);
       d.setUTCDate(d.getUTCDate() + i);
-      const key = d.toISOString().split('T')[0];
-      const rev = revMap.get(key) ?? 0;
-      const exp = expMap.get(key) ?? 0;
-      revenueByDayArr.push({ date: key, revenue: rev, expenses: exp, profit: rev - exp });
+      const key  = d.toISOString().split('T')[0];
+      const rev  = revMap.get(key)  ?? 0;
+      const cost = costMap.get(key) ?? 0;
+      const exp  = expMap.get(key)  ?? 0;
+      revenueByDayArr.push({ date: key, revenue: rev, expenses: exp, profit: rev - cost - exp });
     }
 
     // ── Expense categories with percentages ───────────────────────────────────
@@ -439,6 +482,9 @@ class ReportsService {
 
       profitAndLoss: {
         totalRevenue,
+        costOfGoodsSold,
+        grossProfit,
+        grossMargin,
         totalExpenses,
         netProfit,
         profitMargin,
@@ -451,7 +497,8 @@ class ReportsService {
         cashOutflows: totalExpenses,
         endingBalance,
         burnRate,
-        runway: runway === Infinity ? -1 : runway,   // -1 means no burn (infinite runway)
+        netBurnRate,
+        runway,   // -1 = not burning, 0 = already out of cash
       },
 
       expenseReport: {

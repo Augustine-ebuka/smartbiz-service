@@ -14,6 +14,9 @@
 // - Companies require additional information to determine small-company status.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { User, ITaxSettings, DEFAULT_TAX_SETTINGS } from '../models/user.model';
+import activityLogService from './activityLogService';
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const DAYS_IN_YEAR = 365;
@@ -96,7 +99,10 @@ const DEVELOPMENT_LEVY_RATE = 0.04;
 // VAT
 // ─────────────────────────────────────────────────────────────────────────────
 
-const VAT_RATE = 0.075;
+// Exported so other services (e.g. incomeService, when computing vatAmount on
+// a sale) reuse this exact constant instead of duplicating "7.5%" elsewhere —
+// a future rate change then only needs updating in this one place.
+export const VAT_RATE = 0.075;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -755,11 +761,59 @@ function computeWHT(
   };
 }
 
+// ─── Settings helper ────────────────────────────────────────────────────────
+// owner.settings.taxSettings is a Mongoose single-nested subdocument, not a
+// plain object — spreading it directly copies Mongoose's internal bookkeeping
+// ($__, _doc, etc.) instead of just the real fields. Always go through
+// .toObject() first (same bug class fixed in payrollService's preferences).
+function toPlainTaxSettings(value: any): Partial<ITaxSettings> {
+  if (!value) return {};
+  return typeof value.toObject === 'function' ? value.toObject() : value;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SERVICE
 // ─────────────────────────────────────────────────────────────────────────────
 
 class TaxService {
+
+  // ─── Settings ────────────────────────────────────────────────────────────
+  // The business's persistent tax profile — set once, then reused by
+  // computeFullEstimate() below instead of requiring every caller to
+  // resupply businessStructure/VAT registration/company details each time.
+
+  async getSettings(userId: string): Promise<ITaxSettings> {
+    const owner = await User.findById(userId).select('settings.taxSettings');
+    return { ...DEFAULT_TAX_SETTINGS, ...toPlainTaxSettings(owner?.settings?.taxSettings) };
+  }
+
+  async updateSettings(userId: string, payload: Partial<ITaxSettings>, actorId: string): Promise<ITaxSettings> {
+    const owner = await User.findById(userId);
+    if (!owner) throw new Error('User not found.');
+
+    if (!owner.settings) owner.settings = {};
+    const merged: ITaxSettings = {
+      ...DEFAULT_TAX_SETTINGS,
+      ...toPlainTaxSettings(owner.settings.taxSettings),
+      ...payload,
+    };
+    owner.settings.taxSettings = merged;
+    await owner.save();
+
+    const actor = await User.findById(actorId).select('firstName lastName role');
+    await activityLogService.log({
+      businessOwnerId: userId,
+      actorId,
+      actorName: actor ? `${actor.firstName} ${actor.lastName}`.trim() : 'Unknown',
+      actorRole: actor?.role ?? 'unknown',
+      action: 'tax.update_settings',
+      description: 'Tax settings updated',
+      resourceId: userId,
+    });
+
+    return merged;
+  }
+
   /**
    * Calculate individual PAYE.
    *

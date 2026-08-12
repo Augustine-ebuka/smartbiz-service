@@ -48,7 +48,9 @@ export interface DashboardData {
   kpis: {
     salesToday: number;
     expensesToday: number;
-    profitThisMonth: number;
+    profitThisMonth: number;        // true net profit: revenue - cost of goods sold - expenses
+    grossProfitThisMonth: number;   // revenue - cost of goods sold (before operating expenses)
+    costOfGoodsThisMonth: number;
     cashBalance: number;
     totalCustomers: number;
     totalStaff: number;
@@ -102,7 +104,7 @@ class DashboardService {
 
       Income.aggregate([
         { $match: { userId, date: { $gte: monthStart, $lte: monthEnd } } },
-        { $group: { _id: null, total: { $sum: '$amount' } } },
+        { $group: { _id: null, total: { $sum: '$amount' }, totalCost: { $sum: '$costAmount' } } },
       ]),
 
       Expense.aggregate([
@@ -164,10 +166,18 @@ class DashboardService {
 
     // ── Build KPIs ────────────────────────────────────────────────────────────
 
+    const revenueThisMonth = incomeThisMonth[0]?.total     ?? 0;
+    const costThisMonth    = incomeThisMonth[0]?.totalCost ?? 0;
+    const expensesMonth    = expensesThisMonth[0]?.total   ?? 0;
+
     const kpis = {
       salesToday:      salesToday[0]?.total      ?? 0,
       expensesToday:   expensesToday[0]?.total   ?? 0,
-      profitThisMonth: (incomeThisMonth[0]?.total  ?? 0) - (expensesThisMonth[0]?.total ?? 0),
+      // True net profit — revenue minus cost of goods sold minus operating
+      // expenses. (Previously this omitted cost of goods entirely.)
+      profitThisMonth:      revenueThisMonth - costThisMonth - expensesMonth,
+      grossProfitThisMonth: revenueThisMonth - costThisMonth,
+      costOfGoodsThisMonth: costThisMonth,
       cashBalance:     (allTimeIncome[0]?.total    ?? 0) - (allTimeExpenses[0]?.total   ?? 0),
       totalCustomers,
       totalStaff,

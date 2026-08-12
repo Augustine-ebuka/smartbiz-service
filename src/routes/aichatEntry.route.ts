@@ -7,6 +7,7 @@ import { ExpenseCategory } from '../models/expenseCategory.model';
 import { Customer } from '../models/customer.model';
 import IncomeService from '../services/incomeService';
 import ExpenseService from '../services/expensesService';
+import ProductService from '../services/productService';
 import inventoryService from '../services/inventory.service';
 import { createDebtRecord, markDebtRecordAsPaid } from '../services/debtrecordService';
 import { DebtRecordModel } from '../models/debtrecord';
@@ -340,6 +341,40 @@ router.post('/chat/entry', async (req, res) => {
         return;
       }
 
+      case 'ADD_PRODUCT': {
+        if (!payload.productName) {
+          askForMore(replyToUser || 'What should this product or service be called?');
+          return;
+        }
+        if (!payload.sellingPrice) {
+          askForMore(replyToUser || 'What should the selling price be?');
+          return;
+        }
+        if (!payload.costPrice) {
+          askForMore(replyToUser || 'What does this cost you (cost price)?');
+          return;
+        }
+
+        const existing = await findProductByName(userId, payload.productName);
+        if (existing) {
+          res.json({
+            reply: `You already have "${existing.name}" in your catalog at ₦${existing.price.toLocaleString()}. I won't create a duplicate — let me know if you want to update it instead.`,
+            history: [],
+          });
+          return;
+        }
+
+        const product = await ProductService.create(userId, {
+          name: payload.productName,
+          type: payload.productType === 'Service' ? 'Service' : 'Good',
+          price: payload.sellingPrice,
+          costPrice: payload.costPrice,
+        }, actorId);
+
+        res.json({ success: true, actionExecuted: actionType, reply: replyToUser, data: product, history: [] });
+        return;
+      }
+
       case 'ADD_DEBT': {
         if (!payload.amount || !payload.customerName || !payload.debtType) {
           askForMore(replyToUser || "Who is this debt with, how much is it, and do they owe you or do you owe them?");
@@ -475,14 +510,32 @@ router.post('/chat/entry', async (req, res) => {
           IncomeService.getSummary(userId, startDate, endDate),
           ExpenseService.getSummary(userId, startDate, endDate),
         ]);
-        const profit = incomeSummary.total - expenseSummary.total;
+        // True net profit = revenue - cost of goods sold - operating expenses.
+        // Gross margin (revenue - COGS alone) is a separate, secondary figure —
+        // only mentioned when there's actual cost data, so businesses that
+        // haven't recorded cost prices yet don't see a misleading "100% margin".
+        const hasCostData = incomeSummary.totalCost > 0;
+        const profit = incomeSummary.grossProfit - expenseSummary.total;
+        const marginPct = hasCostData ? Math.round((incomeSummary.grossProfit / incomeSummary.total) * 1000) / 10 : null;
         const leadIn = summaryLeadIn(payload.period, payload.date);
-        const reply = `${leadIn} you made ₦${incomeSummary.total.toLocaleString()} and spent ₦${expenseSummary.total.toLocaleString()}, for a profit of ₦${profit.toLocaleString()}.`;
+        let reply = `${leadIn} you made ₦${incomeSummary.total.toLocaleString()} and spent ₦${expenseSummary.total.toLocaleString()}, for a net profit of ₦${profit.toLocaleString()}.`;
+        if (hasCostData) {
+          reply += ` Of that revenue, ₦${incomeSummary.totalCost.toLocaleString()} went to cost of goods sold, leaving a gross margin of ₦${incomeSummary.grossProfit.toLocaleString()} (${marginPct}%).`;
+        }
         res.json({
           success: true,
           actionExecuted: actionType,
           reply,
-          data: { period: payload.date ? undefined : (payload.period || 'ALL_TIME'), date: payload.date, income: incomeSummary.total, expense: expenseSummary.total, profit },
+          data: {
+            period: payload.date ? undefined : (payload.period || 'ALL_TIME'),
+            date: payload.date,
+            income: incomeSummary.total,
+            expense: expenseSummary.total,
+            profit,
+            costOfGoodsSold: incomeSummary.totalCost,
+            grossProfit: incomeSummary.grossProfit,
+            grossMarginPercent: marginPct,
+          },
           history: [],
         });
         return;

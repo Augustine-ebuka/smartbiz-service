@@ -103,16 +103,61 @@ export const DEFAULT_PAYROLL_PREFERENCES: IPayrollPreferences = {
 
 export interface IAppPreferences {
   theme?: 'light' | 'dark' | 'system';
+  primaryColor?: string;     // e.g. "#007bff"
   language?: string;         // e.g. "en", "fr"
   timezone?: string;         // e.g. "America/New_York"
   dateFormat?: string;       // e.g. "MM/DD/YYYY"
   notificationsEnabled?: boolean;
 }
 
+// ─── Tax Settings ──────────────────────────────────────────────────────────
+// The business's own tax profile — persisted once, then reused by TaxService
+// (see services/tax.service.ts) to produce a full income tax / VAT / CIT
+// estimate, instead of requiring the caller to resupply business structure,
+// VAT registration, company details, and reliefs as query params on every
+// single request. This is deliberately separate from IPayrollPreferences
+// above: that block governs tax WITHHELD FROM EMPLOYEES on a payroll run;
+// this one is the business's own income/VAT/company tax position.
+//
+// businessStructure mirrors tax.service.ts's BusinessStructure type — kept as
+// its own literal union here (rather than imported) so this model doesn't
+// take a dependency on the service layer. Keep the two lists in sync.
+
+export type BusinessStructure = 'individual' | 'sole_trader' | 'registered_company';
+
+export interface ITaxReliefs {
+  pensionContribution?: number;
+  nhfContribution?: number;
+  lifeAssurancePremium?: number;
+  otherAllowableReliefs?: number;
+}
+
+export interface ITaxSettings {
+  businessStructure: BusinessStructure;
+
+  // VAT — whether the business charges/remits VAT at all. Rate itself is NOT
+  // stored here; it's the statutory rate exported from tax.service.ts
+  // (VAT_RATE), so a future law change updates it in exactly one place.
+  vatRegistered: boolean;
+
+  // Only meaningful when businessStructure === 'registered_company'
+  fixedAssets?: number;
+  isProfessionalService?: boolean;
+
+  // Only meaningful for 'individual' / 'sole_trader' PAYE-style estimates
+  reliefs?: ITaxReliefs;
+}
+
+export const DEFAULT_TAX_SETTINGS: ITaxSettings = {
+  businessStructure: 'sole_trader',
+  vatRegistered: false,
+};
+
 export interface ISettings {
   companyProfile?: ICompanyProfile;
   appPreferences?: IAppPreferences;
   payrollPreferences?: IPayrollPreferences;
+  taxSettings?: ITaxSettings;
 }
 
 // ─── User Role ────────────────────────────────────────────────────────────────
@@ -225,6 +270,7 @@ const AppPreferencesSchema = new Schema<IAppPreferences>(
     timezone:             { type: String, trim: true, default: 'UTC' },
     dateFormat:           { type: String, trim: true, default: 'MM/DD/YYYY' },
     notificationsEnabled: { type: Boolean, default: true },
+    primaryColor:           { type: String, trim: true, default: '#007bff' },
   },
   { _id: false }
 );
@@ -240,11 +286,33 @@ const PayrollPreferencesSchema = new Schema<IPayrollPreferences>(
   { _id: false }
 );
 
+const TaxReliefsSchema = new Schema<ITaxReliefs>(
+  {
+    pensionContribution:   { type: Number, min: 0 },
+    nhfContribution:       { type: Number, min: 0 },
+    lifeAssurancePremium:  { type: Number, min: 0 },
+    otherAllowableReliefs: { type: Number, min: 0 },
+  },
+  { _id: false }
+);
+
+const TaxSettingsSchema = new Schema<ITaxSettings>(
+  {
+    businessStructure:     { type: String, enum: ['individual', 'sole_trader', 'registered_company'], default: 'sole_trader' },
+    vatRegistered:         { type: Boolean, default: false },
+    fixedAssets:           { type: Number, min: 0 },
+    isProfessionalService: { type: Boolean, default: false },
+    reliefs:               { type: TaxReliefsSchema },
+  },
+  { _id: false }
+);
+
 const SettingsSchema = new Schema<ISettings>(
   {
     companyProfile:      { type: CompanyProfileSchema },
     appPreferences:      { type: AppPreferencesSchema },
     payrollPreferences:  { type: PayrollPreferencesSchema },
+    taxSettings:         { type: TaxSettingsSchema },
   },
   { _id: false }
 );
