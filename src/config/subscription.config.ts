@@ -47,7 +47,7 @@ export const PLANS: Record<PlanId, Plan> = {
   monthly: {
     id:           'monthly',
     name:         'Pro Monthly',
-    priceKobo:    1000000,           // ₦5,000 in kobo
+    priceKobo:    599900,            // ₦5,999 in kobo
     durationDays: 30,
     limits: {
       aiQueriesPerDay:    15,
@@ -66,7 +66,7 @@ export const PLANS: Record<PlanId, Plan> = {
   yearly: {
     id:           'yearly',
     name:         'Pro Yearly',
-    priceKobo:    100000000,          // ₦50,000 in kobo
+    priceKobo:    6200000,            // ₦62,000 in kobo
     durationDays: 365,
     limits: {
       aiQueriesPerDay:    15,

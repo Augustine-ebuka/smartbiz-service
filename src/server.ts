@@ -8,13 +8,15 @@ dotenv.config();
 import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
+import helmet from 'helmet';
 import route from './routes/index';
 import { APP_NAME, APP_PREFIX_PATH, IS_TEST, APP_PORT, APP_FRONTEND, IS_PRODUCTION, MONGODB_URI } from './config/config'
 import ApiError from './utils/ApiError';
 import { initCronJobs } from './utils/cronjobs';
 const app = express();
 const PORT = process.env.PORT || APP_PORT;
-// added useless comment
+
+app.use(helmet());
 
 async function dropLegacyUserOtpTtlIndexes() {
   const usersCollection = mongoose.connection.collection('users');

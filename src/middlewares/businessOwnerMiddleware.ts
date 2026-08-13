@@ -25,8 +25,6 @@ export async function resolveBusinessOwner(
       return;
     }
 
-    console.log(user);
-
     if (!user.isActive) {
       res.status(403).json({ success: false, message: 'Your account has been deactivated.' });
       return;
