@@ -64,10 +64,13 @@ class IncomeService {
       if (!customer) throw new Error('Customer not found.');
     }
 
-    // Strip `returned` even though the DTO type doesn't offer it — payload
-    // arrives as untyped req.body at the HTTP boundary. A brand-new sale can
-    // never start out already-returned.
-    const { returned: _ignoredReturned, ...safePayload } = payload as CreateIncomeDTO & { returned?: boolean };
+    // Strip `returned` and `receiptId` even though the DTO type doesn't offer
+    // them — payload arrives as untyped req.body at the HTTP boundary. A
+    // brand-new sale can never start out already-returned, and receiptId must
+    // always come from the server-side auto-generator (schema pre-save hook)
+    // so it stays unique — a client-supplied value (e.g. one ID reused across
+    // a batch of grouped income entries) would otherwise hit the unique index.
+    const { returned: _ignoredReturned, receiptId: _ignoredReceiptId, ...safePayload } = payload as CreateIncomeDTO & { returned?: boolean; receiptId?: string };
 
     const unit = payload.unit ?? 1;
 
@@ -100,7 +103,22 @@ class IncomeService {
       date:          payload.date ? new Date(payload.date) : new Date(),
     });
 
-    await income.save();
+    // receiptId is generated from a countDocuments snapshot (see income.model.ts),
+    // which isn't atomic — two saves for the same user landing at the same time
+    // (e.g. a "group incomes" batch fired concurrently) can compute the same
+    // number and collide on the unique index. Retry a few times, letting the
+    // pre-save hook recompute a fresh count each attempt, before giving up.
+    const MAX_RECEIPT_ID_RETRIES = 5;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await income.save();
+        break;
+      } catch (error: any) {
+        const isReceiptIdCollision = error?.code === 11000 && error?.keyPattern?.receiptId;
+        if (!isReceiptIdCollision || attempt >= MAX_RECEIPT_ID_RETRIES) throw error;
+        income.receiptId = undefined as any;
+      }
+    }
 
     const { actorName, actorRole } = await getActorInfo(actorId ?? userId);
 
@@ -186,10 +204,12 @@ class IncomeService {
       if (!customer) throw new Error('Customer not found.');
     }
 
-    // Strip `returned` even though the DTO type no longer offers it — payload
-    // arrives as untyped req.body at the HTTP boundary, so a raw client could
-    // still send it. Only markAsReturned() may flip that flag.
-    const { returned: _ignoredReturned, ...safePayload } = payload as UpdateIncomeDTO & { returned?: boolean };
+    // Strip `returned` and `receiptId` even though the DTO type no longer
+    // offers them — payload arrives as untyped req.body at the HTTP boundary,
+    // so a raw client could still send them. Only markAsReturned() may flip
+    // the returned flag, and receiptId is server-generated and must stay
+    // immutable once assigned.
+    const { returned: _ignoredReturned, receiptId: _ignoredReceiptId, ...safePayload } = payload as UpdateIncomeDTO & { returned?: boolean; receiptId?: string };
 
     const income = await Income.findOneAndUpdate(
       { _id: incomeId, userId },

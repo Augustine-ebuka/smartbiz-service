@@ -657,6 +657,35 @@ class EmailService {
     });
   }
 
+  async sendInvoiceClaimNotification({
+    to, ownerName, invoiceNumber, claimantName, claimantEmail, proofUrl, total, claimedAt,
+  }: {
+    to: string;
+    ownerName: string;
+    invoiceNumber: string;
+    claimantName?: string;
+    claimantEmail?: string;
+    proofUrl?: string;
+    total?: number;
+    claimedAt: Date;
+  }): Promise<void> {
+    const html = `
+      <p>Hi ${ownerName},</p>
+      <p>A claim was submitted for invoice <strong>${invoiceNumber}</strong> on ${claimedAt.toISOString()}.</p>
+      <p><strong>Claimant:</strong> ${claimantName ?? 'Anonymous'} (${claimantEmail ?? 'no email provided'})</p>
+      <p><strong>Amount:</strong> ${total != null ? '₦' + total.toLocaleString('en-NG') : 'N/A'}</p>
+      ${proofUrl ? `<p>Proof: <a href="${proofUrl}">View proof</a></p>` : ''}
+      <p>Visit the dashboard to review and respond to this claim.</p>
+    `;
+
+    await resend.emails.send({
+      from: FROM_ADDRESS,
+      to,
+      subject: `Claim submitted for invoice ${invoiceNumber}`,
+      html,
+    });
+  }
+
   async sendWalletFunded({
     to, firstName, amount, newBalance, reference, source, fundedAt,
   }: SendWalletFundedOptions): Promise<void> {

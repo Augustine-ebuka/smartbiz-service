@@ -34,3 +34,9 @@ export const uploadAvatar = multer({
   storage: makeStorage('user-avatars', ['jpg', 'jpeg', 'png', 'webp']),
   limits: { fileSize: 2 * 1024 * 1024 },   // 2MB max
 }).single('avatar');
+
+// ─── Claim proof upload (invoice claims) ───────────────────────────────────
+export const uploadClaimProof = multer({
+  storage: makeStorage('invoice-claims', ['jpg', 'jpeg', 'png', 'webp', 'pdf']),
+  limits: { fileSize: 8 * 1024 * 1024 }, // 8MB max
+}).single('proof');

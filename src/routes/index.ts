@@ -24,6 +24,7 @@ import subscriptionRoute from './subscription.route';
 import adminRoute from './admin.route';
 import supportRoute from './support.routes';
 import invoiceRoutes from './invoice.routes';
+import claimRoute from './claim.route';
 import vendorRoute from './vendor.routes';
 import payrollRoutes from './payroll.routes';
 import taxRoutes from './tax.routes';
@@ -53,6 +54,8 @@ router.use("/v1/ai", aiChatEntryRoute);
 router.use("/v1/subscription", subscriptionRoute);
 router.use("/v1/admin", adminRoute);
 router.use("/v1/support", supportRoute);
+// Public claim endpoints mounted before authenticated invoice routes
+router.use("/v1/invoices/claim", claimRoute);
 router.use("/v1/invoices", invoiceRoutes);
 router.use("/v1/vendors", vendorRoute);
 router.use("/v1/payroll", payrollRoutes);

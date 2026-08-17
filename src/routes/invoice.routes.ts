@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import InvoiceController from '../controllers/invoice.controller';
+import ClaimController from '../controllers/claim.controller';
 
 import { authenticateToken } from '../middlewares/authMiddleware';
 import {resolveBusinessOwner} from '../middlewares/businessOwnerMiddleware';
@@ -7,6 +8,7 @@ import { checkSubscription } from '../middlewares/subscriptionMiddleware';
 
 const router = Router();
 
+// Protect invoice management routes — token generation uses authenticated owner flow
 router.use(authenticateToken, resolveBusinessOwner);
 
 // GET    /api/v1/invoices/summary                → totals by status + outstanding amounts
@@ -22,6 +24,7 @@ router.use(authenticateToken, resolveBusinessOwner);
 router.get   ('/summary',          InvoiceController.getSummary);
 router.get   ('/',                  InvoiceController.getAll);
 router.post  ('/', checkSubscription('invoices'), InvoiceController.create);
+router.post  ('/:id/claim-token', ClaimController.generateToken);
 router.get   ('/:id',              InvoiceController.getById);
 router.patch ('/:id',              InvoiceController.update);
 router.patch ('/:id/mark-paid',    InvoiceController.markAsPaid);

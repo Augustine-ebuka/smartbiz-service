@@ -150,14 +150,25 @@ class InvoiceService {
       recurring,
     });
 
+    // invoiceNumber is generated from a countDocuments snapshot (see
+    // invoice.model.ts), which isn't atomic — two saves for the same user
+    // landing at the same time can compute the same number and collide on
+    // the unique index. Retry a few times, letting the pre-save hook
+    // recompute a fresh count each attempt, before giving up.
+    const MAX_INVOICE_NUMBER_RETRIES = 5;
     let saved: IInvoice;
-    try {
-      saved = await invoice.save();
-    } catch (error: any) {
-      if (error?.name === 'ValidationError') {
-        throw new ApiError(400, error.message);
+    for (let attempt = 1; ; attempt++) {
+      try {
+        saved = await invoice.save();
+        break;
+      } catch (error: any) {
+        if (error?.name === 'ValidationError') {
+          throw new ApiError(400, error.message);
+        }
+        const isInvoiceNumberCollision = error?.code === 11000 && error?.keyPattern?.invoiceNumber;
+        if (!isInvoiceNumberCollision || attempt >= MAX_INVOICE_NUMBER_RETRIES) throw error;
+        invoice.invoiceNumber = undefined as any;
       }
-      throw error;
     }
 
     const { actorName, actorRole } = await getActorInfo(actorId ?? userId);
@@ -471,7 +482,17 @@ class InvoiceService {
         },
       });
 
-      await newInvoice.save();
+      const MAX_INVOICE_NUMBER_RETRIES = 5;
+      for (let attempt = 1; ; attempt++) {
+        try {
+          await newInvoice.save();
+          break;
+        } catch (error: any) {
+          const isInvoiceNumberCollision = error?.code === 11000 && error?.keyPattern?.invoiceNumber;
+          if (!isInvoiceNumberCollision || attempt >= MAX_INVOICE_NUMBER_RETRIES) throw error;
+          newInvoice.invoiceNumber = undefined as any;
+        }
+      }
 
       // Update the parent invoice's nextIssueDate and occurrences
       await Invoice.findByIdAndUpdate(invoice._id, {
