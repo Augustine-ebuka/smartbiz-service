@@ -30,6 +30,9 @@ export interface CreateIncomeDTO {
   note?: string;
   vat?: boolean;
   vatAmount?: number;
+  groupRef?: string; 
+  receiptId?: string; // optional, but will be ignored if supplied — server always generates it
+  // caller-supplied tag to group records saved together in one bulk submission
   // returned is deliberately NOT settable here — it can only be flipped via
   // markAsReturned(), which also restocks inventory and records a refund
   // expense. Allowing it through generic create/update would let a plain
@@ -46,6 +49,7 @@ export interface IncomeFilterDTO {
   endDate?: string;
   search?: string;
   receiptId?: string;
+  groupRef?: string;
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -79,7 +83,6 @@ class IncomeService {
     // this, costAmount silently stays 0 and profit reporting is meaningless —
     // recording cost once on the product beats asking for it on every sale.
     const costAmount = payload.costAmount ?? (product?.costPrice != null ? product.costPrice * unit : 0);
-
     // Auto-compute VAT the same way: only if this sale is flagged VAT-able
     // AND the business is actually VAT-registered (an unregistered business
     // can't legally charge VAT, so the flag alone isn't trusted). amount is
@@ -165,6 +168,7 @@ class IncomeService {
      if (filters.customerId)    query.customerId    = filters.customerId;
      if (filters.paymentMethod) query.paymentMethod = filters.paymentMethod;
      if (filters.receiptId)     query.receiptId     = filters.receiptId;
+     if (filters.groupRef)      query.groupRef      = filters.groupRef;
 
      if (filters.startDate || filters.endDate) {
        query.date = {};
@@ -176,6 +180,7 @@ class IncomeService {
        query.$or = [
          { note:      { $regex: filters.search, $options: 'i' } },
          { receiptId: { $regex: filters.search, $options: 'i' } },
+         { groupRef:  { $regex: filters.search, $options: 'i' } },
        ];
      }
  

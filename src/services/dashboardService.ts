@@ -33,6 +33,7 @@ export interface DayPoint {
   date: string;
   income: number;
   expense: number;
+  profit: number;
 }
 
 export interface RecentActivityItem {
@@ -128,6 +129,7 @@ class DashboardService {
           $group: {
             _id: { $dateToString: { format: '%Y-%m-%d', date: '$date', timezone: 'UTC' } },
             total: { $sum: '$amount' },
+            totalCost: { $sum: '$costAmount' },
           },
         },
         { $sort: { _id: 1 } },
@@ -190,6 +192,7 @@ class DashboardService {
     // ── Build 7-day chart data ────────────────────────────────────────────────
 
     const incomeMap  = new Map(last7DaysIncome.map((r: any)   => [r._id, r.total]));
+    const costMap    = new Map(last7DaysIncome.map((r: any)   => [r._id, r.totalCost]));
     const expenseMap = new Map(last7DaysExpenses.map((r: any) => [r._id, r.total]));
 
     const last7Days: DayPoint[] = Array.from({ length: 7 }, (_, i) => {
@@ -197,10 +200,16 @@ class DashboardService {
       d.setUTCDate(d.getUTCDate() + i);
       const key   = d.toISOString().split('T')[0];                         // "2026-06-21"
       const label = d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }); // "Sat"
+      const income  = incomeMap.get(key)  ?? 0;
+      const cost    = costMap.get(key)    ?? 0;
+      const expense = expenseMap.get(key) ?? 0;
       return {
         date:    label,
-        income:  incomeMap.get(key)  ?? 0,
-        expense: expenseMap.get(key) ?? 0,
+        income,
+        expense,
+        // True net profit, same definition as kpis.profitThisMonth: revenue
+        // minus cost of goods sold minus operating expenses.
+        profit:  income - cost - expense,
       };
     });
 

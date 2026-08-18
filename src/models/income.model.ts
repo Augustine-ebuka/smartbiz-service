@@ -9,6 +9,7 @@ export type PaymentMethod = 'Cash' | 'Bank Transfer' | 'Card' | 'Mobile Money' |
 export interface IIncome extends Document {
   _id: string;
   receiptId: string;                      // auto-generated e.g. "RCT-00001"
+  groupRef?: string;                      // client-supplied tag shared by records saved in the same bulk/group submission
   userId: string;
   productId?: mongoose.Types.ObjectId;    // ref → Product (optional, can be custom amount)
   unit: number;                           // quantity
@@ -32,7 +33,8 @@ export interface IIncome extends Document {
 
 const IncomeSchema = new Schema<IIncome>(
   {
-    receiptId:     { type: String, unique: true },
+    receiptId:     { type: String},
+    groupRef:      { type: String, index: true },
     userId:        { type: String, required: true, index: true },
     productId:     { type: Schema.Types.ObjectId, ref: 'Product' },
     unit:          { type: Number, required: true, min: 1, default: 1 },
