@@ -8,6 +8,7 @@ import { Customer } from '../models/customer.model';
 import IncomeService from '../services/incomeService';
 import ExpenseService from '../services/expensesService';
 import ProductService from '../services/productService';
+import InvoiceService from '../services/invoice.service';
 import inventoryService from '../services/inventory.service';
 import { createDebtRecord, markDebtRecordAsPaid } from '../services/debtrecordService';
 import { DebtRecordModel } from '../models/debtrecord';
@@ -407,6 +408,74 @@ router.post('/chat/entry', async (req, res) => {
           description: payload.description,
         }, existingCustomer._id.toString());
         res.json({ success: true, actionExecuted: actionType, reply: replyToUser, data: debt, history: [] });
+        return;
+      }
+
+      case 'GENERATE_INVOICE': {
+        if (!payload.customerName) {
+          askForMore(replyToUser || 'Who is this invoice for?');
+          return;
+        }
+
+        const items = payload.invoiceItems as Array<{ description: string; quantity?: number; unitPrice?: number }> | undefined;
+        if (!items || items.length === 0) {
+          askForMore(replyToUser || 'What items or services should I include on this invoice?');
+          return;
+        }
+
+        // Resolve each line item's price — trust an explicit price the user gave,
+        // otherwise look it up from the product catalog by name. All items must
+        // resolve before we create anything, so we never invoice a wrong/guessed price.
+        const resolvedItems: Array<{ description: string; quantity: number; unitPrice: number; productId?: string }> = [];
+        const unpriced: string[] = [];
+
+        for (const item of items) {
+          let unitPrice = item.unitPrice;
+          let productId: string | undefined;
+          if (unitPrice == null) {
+            const product = await findProductByName(userId, item.description);
+            if (product) {
+              unitPrice = product.price;
+              productId = product._id.toString();
+            }
+          }
+          if (unitPrice == null) {
+            unpriced.push(item.description);
+            continue;
+          }
+          resolvedItems.push({ description: item.description, quantity: item.quantity ?? 1, unitPrice, productId });
+        }
+
+        if (unpriced.length > 0) {
+          askForMore(`What's the price for ${unpriced.join(', ')}? I couldn't find ${unpriced.length === 1 ? 'it' : 'them'} in your product catalog.`);
+          return;
+        }
+
+        // Default to a 14-day payment window when the user doesn't state a due date.
+        const dueDate = payload.dueDate ?? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+        const invoice = await InvoiceService.create(userId, {
+          customerName:  payload.customerName,
+          customerEmail: payload.customerEmail,
+          customerPhone: payload.customerPhone,
+          dueDate,
+          lineItems: resolvedItems,
+          notes: payload.description,
+          taxPercent:    payload.taxPercent,
+          discountValue: payload.discountValue,
+          discountType:  payload.discountType,
+        }, actorId);
+
+        res.json({
+          success: true,
+          actionExecuted: actionType,
+          reply: replyToUser,
+          data: invoice,
+          // Relative to the API base the frontend already uses for every other
+          // endpoint (e.g. the same host+prefix as /records/income).
+          pdfUrl: `/v1/invoices/${invoice._id}/pdf`,
+          history: [],
+        });
         return;
       }
 

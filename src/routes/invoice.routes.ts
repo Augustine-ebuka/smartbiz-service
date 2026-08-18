@@ -18,6 +18,8 @@ router.use(authenticateToken, resolveBusinessOwner);
 // PATCH  /api/v1/invoices/:id                    → update invoice
 // PATCH  /api/v1/invoices/:id/mark-paid         → mark as paid
 // PATCH  /api/v1/invoices/:id/mark-sent         → mark draft as sent
+// POST   /api/v1/invoices/:id/send-email        → email the invoice to customerEmail
+// GET    /api/v1/invoices/:id/pdf                → download the invoice as a PDF
 // PATCH  /api/v1/invoices/:id/cancel            → cancel invoice
 // DELETE /api/v1/invoices/:id                    → delete invoice
 
@@ -29,6 +31,8 @@ router.get   ('/:id',              InvoiceController.getById);
 router.patch ('/:id',              InvoiceController.update);
 router.patch ('/:id/mark-paid',    InvoiceController.markAsPaid);
 router.patch ('/:id/mark-sent',    InvoiceController.markAsSent);
+router.post  ('/:id/send-email',   InvoiceController.sendEmail);
+router.get   ('/:id/pdf',          InvoiceController.downloadPdf);
 router.patch ('/:id/cancel',       InvoiceController.cancel);
 router.delete('/:id',              InvoiceController.delete);
 

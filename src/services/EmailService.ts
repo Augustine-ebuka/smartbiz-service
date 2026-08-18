@@ -51,6 +51,33 @@ interface SendPurchaseReceiptOptions {
   paidAt: Date;
 }
 
+interface InvoiceLineItem {
+  description: string;
+  quantity:    number;
+  unitPrice:   number;
+  amount:      number;
+}
+
+interface SendInvoiceOptions {
+  to: string;                      // customer email
+  invoiceNumber: string;
+  businessName: string;
+  businessEmail?: string;
+  businessPhone?: string;
+  customerName: string;
+  issueDate: Date;
+  dueDate: Date;
+  lineItems: InvoiceLineItem[];
+  subtotal: number;
+  taxPercent: number;
+  taxAmount: number;
+  discountAmount: number;
+  total: number;
+  currency: string;
+  notes?: string;
+  pdfBuffer?: Buffer;   // when present, attached to the email as a downloadable PDF
+}
+
 interface SendWalletFundedOptions {
   to: string;
   firstName: string;
@@ -509,6 +536,142 @@ function purchaseReceiptTemplate(
   `;
 }
 
+// ─── Invoice Template (to customer) ────────────────────────────────────────────
+
+function invoiceEmailTemplate(
+  invoiceNumber: string,
+  businessName: string,
+  businessEmail: string | undefined,
+  businessPhone: string | undefined,
+  customerName: string,
+  issueDate: Date,
+  dueDate: Date,
+  lineItems: InvoiceLineItem[],
+  subtotal: number,
+  taxPercent: number,
+  taxAmount: number,
+  discountAmount: number,
+  total: number,
+  currency: string,
+  notes: string | undefined
+): string {
+  const fmt = (n: number) => `${currency} ${n.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+  const fmtDate = (d: Date) => new Date(d).toLocaleDateString('en-NG', { dateStyle: 'long', timeZone: 'Africa/Lagos' });
+
+  const productRows = lineItems.map(item => `
+    <tr>
+      <td style="padding:12px 0;border-bottom:1px solid #f3f4f6;color:#374151;font-size:14px">${item.description}</td>
+      <td style="padding:12px 0;border-bottom:1px solid #f3f4f6;color:#6b7280;font-size:14px;text-align:center">${item.quantity}</td>
+      <td style="padding:12px 0;border-bottom:1px solid #f3f4f6;color:#374151;font-size:14px;text-align:right">${fmt(item.unitPrice)}</td>
+      <td style="padding:12px 0;border-bottom:1px solid #f3f4f6;color:#111827;font-size:14px;text-align:right;font-weight:600">${fmt(item.amount)}</td>
+    </tr>
+  `).join('');
+
+  const contactLine = [businessEmail, businessPhone].filter(Boolean).join(' · ');
+
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+    <title>Invoice ${invoiceNumber}</title></head>
+    <body style="margin:0;padding:0;background:#f4f4f5;font-family:Arial,sans-serif">
+      <div style="max-width:560px;margin:40px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)">
+
+        <!-- Header -->
+        <div style="background:linear-gradient(135deg,#1d4ed8 0%,#0f172a 100%);padding:32px 40px;text-align:center">
+          <div style="font-size:36px;margin-bottom:8px">🧾</div>
+          <h1 style="margin:0;color:#fff;font-size:22px">Invoice ${invoiceNumber}</h1>
+          <p style="margin:6px 0 0;color:#bfdbfe;font-size:14px">${businessName}</p>
+        </div>
+
+        <!-- Body -->
+        <div style="padding:32px 40px">
+
+          <p style="color:#374151;font-size:15px;margin:0 0 4px">Hi <strong>${customerName}</strong>,</p>
+          <p style="color:#374151;font-size:15px;margin:0 0 28px">
+            Please find your invoice from <strong>${businessName}</strong> below.
+          </p>
+
+          <!-- Invoice details -->
+          <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:28px">
+
+            <!-- Dates -->
+            <div style="background:#f9fafb;padding:14px 20px;display:flex;justify-content:space-between;border-bottom:1px solid #e5e7eb">
+              <div>
+                <p style="margin:0;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px">Issue Date</p>
+                <p style="margin:4px 0 0;font-size:13px;font-weight:600;color:#111827">${fmtDate(issueDate)}</p>
+              </div>
+              <div style="text-align:right">
+                <p style="margin:0;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px">Due Date</p>
+                <p style="margin:4px 0 0;font-size:13px;font-weight:600;color:#111827">${fmtDate(dueDate)}</p>
+              </div>
+            </div>
+
+            <!-- Line items table -->
+            <div style="padding:0 20px">
+              <table style="width:100%;border-collapse:collapse">
+                <thead>
+                  <tr>
+                    <th style="text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase;padding:12px 0 8px;border-bottom:2px solid #f3f4f6">Item</th>
+                    <th style="text-align:center;font-size:11px;color:#6b7280;text-transform:uppercase;padding:12px 0 8px;border-bottom:2px solid #f3f4f6">Qty</th>
+                    <th style="text-align:right;font-size:11px;color:#6b7280;text-transform:uppercase;padding:12px 0 8px;border-bottom:2px solid #f3f4f6">Price</th>
+                    <th style="text-align:right;font-size:11px;color:#6b7280;text-transform:uppercase;padding:12px 0 8px;border-bottom:2px solid #f3f4f6">Total</th>
+                  </tr>
+                </thead>
+                <tbody>${productRows}</tbody>
+              </table>
+            </div>
+
+            <!-- Totals breakdown -->
+            <div style="padding:16px 20px 4px">
+              <div style="display:flex;justify-content:space-between;padding:6px 0;color:#6b7280;font-size:13px">
+                <span>Subtotal</span><span>${fmt(subtotal)}</span>
+              </div>
+              ${taxAmount ? `
+              <div style="display:flex;justify-content:space-between;padding:6px 0;color:#6b7280;font-size:13px">
+                <span>Tax (${taxPercent}%)</span><span>${fmt(taxAmount)}</span>
+              </div>` : ''}
+              ${discountAmount ? `
+              <div style="display:flex;justify-content:space-between;padding:6px 0;color:#6b7280;font-size:13px">
+                <span>Discount</span><span>-${fmt(discountAmount)}</span>
+              </div>` : ''}
+            </div>
+
+            <!-- Total -->
+            <div style="background:#1d4ed8;padding:16px 20px;display:flex;justify-content:space-between;align-items:center">
+              <span style="color:#bfdbfe;font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">Total Due</span>
+              <span style="color:#fff;font-size:22px;font-weight:800">${fmt(total)}</span>
+            </div>
+          </div>
+
+          ${notes ? `
+          <div style="background:#f9fafb;border-radius:8px;padding:16px 20px;margin-bottom:24px">
+            <p style="margin:0 0 4px;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px">Notes</p>
+            <p style="margin:0;font-size:13px;color:#374151;line-height:1.6">${notes}</p>
+          </div>` : ''}
+
+          <!-- Business contact -->
+          ${contactLine ? `
+          <div style="border-top:1px solid #f3f4f6;padding-top:20px;text-align:center">
+            <p style="margin:0;font-size:13px;color:#6b7280">Questions? Contact <strong>${businessName}</strong></p>
+            <p style="margin:6px 0 0;font-size:13px;color:#1d4ed8">${contactLine}</p>
+          </div>` : ''}
+
+        </div>
+
+        <!-- Footer -->
+        <div style="background:#f9fafb;padding:20px 40px;text-align:center;border-top:1px solid #f3f4f6">
+          <p style="color:#9ca3af;font-size:12px;margin:0">
+            © ${new Date().getFullYear()} ${businessName}. All rights reserved.
+          </p>
+        </div>
+
+      </div>
+    </body>
+    </html>
+  `;
+}
+
 // ─── Wallet Funded Template ────────────────────────────────────────────────────
 
 function walletFundedTemplate(
@@ -654,6 +817,22 @@ class EmailService {
       to,
       subject: `Your receipt from ${businessName} — ₦${totalAmount.toLocaleString('en-NG')}`,
       html:    purchaseReceiptTemplate(customerName, businessName, businessEmail, businessPhone, products, totalAmount, paymentReference, paidAt),
+    });
+  }
+
+  async sendInvoice({
+    to, invoiceNumber, businessName, businessEmail, businessPhone, customerName,
+    issueDate, dueDate, lineItems, subtotal, taxPercent, taxAmount, discountAmount, total, currency, notes, pdfBuffer,
+  }: SendInvoiceOptions): Promise<void> {
+    await resend.emails.send({
+      from:    FROM_ADDRESS,
+      to,
+      subject: `Invoice ${invoiceNumber} from ${businessName} — ${currency} ${total.toLocaleString('en-NG')}`,
+      html:    invoiceEmailTemplate(
+        invoiceNumber, businessName, businessEmail, businessPhone, customerName,
+        issueDate, dueDate, lineItems, subtotal, taxPercent, taxAmount, discountAmount, total, currency, notes
+      ),
+      ...(pdfBuffer ? { attachments: [{ filename: `${invoiceNumber}.pdf`, content: pdfBuffer, contentType: 'application/pdf' }] } : {}),
     });
   }
 

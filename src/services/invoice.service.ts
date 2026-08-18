@@ -2,6 +2,8 @@ import { Invoice, IInvoice, ILineItem, InvoiceStatus, DiscountType, RecurringInt
 import { User } from '../models/user.model';
 import ApiError from '../utils/ApiError';
 import activityLogService from './activityLogService';
+import emailService from './EmailService';
+import { buildInvoicePdf } from './invoicePdfService';
 
 async function getActorInfo(userId: string): Promise<{ actorName: string; actorRole: string }> {
   const actor = await User.findById(userId).select('firstName lastName role');
@@ -90,6 +92,48 @@ function nextRecurringDate(interval: RecurringInterval, from: Date): Date {
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 class InvoiceService {
+
+  // Shared by create() (when status is 'sent' up front) and sendToCustomer()
+  // (an explicit re-send). Looks up the business's own contact info fresh each
+  // time since it can change between invoices.
+  private async emailInvoiceToCustomer(userId: string, invoice: IInvoice): Promise<void> {
+    const owner   = await User.findById(userId).select('settings.companyProfile');
+    const profile = owner?.settings?.companyProfile;
+
+    const businessInfo = {
+      businessName:  profile?.businessName ?? 'Your Business',
+      email:         profile?.contact?.email,
+      phone:         profile?.contact?.phone,
+      bankName:      profile?.banking?.bankName,
+      accountName:   profile?.banking?.accountName,
+      accountNumber: profile?.banking?.accountNumber,
+    };
+
+    // Attach the same PDF the /pdf download endpoint generates, so the emailed
+    // invoice carries business name, account number, tax and discount even if
+    // the recipient never opens the HTML body.
+    const pdfBuffer = await buildInvoicePdf(invoice, businessInfo);
+
+    await emailService.sendInvoice({
+      to:             invoice.customerEmail!,
+      invoiceNumber:  invoice.invoiceNumber,
+      businessName:   businessInfo.businessName,
+      businessEmail:  businessInfo.email,
+      businessPhone:  businessInfo.phone,
+      customerName:   invoice.customerName,
+      issueDate:      invoice.issueDate,
+      dueDate:        invoice.dueDate,
+      lineItems:      invoice.lineItems,
+      subtotal:       invoice.subtotal,
+      taxPercent:     invoice.taxPercent,
+      taxAmount:      invoice.taxAmount,
+      discountAmount: invoice.discountAmount,
+      total:          invoice.total,
+      currency:       invoice.currency,
+      notes:          invoice.notes,
+      pdfBuffer,
+    });
+  }
 
   async create(userId: string, payload: CreateInvoiceDTO, actorId?: string): Promise<IInvoice> {
     if (!payload.lineItems || payload.lineItems.length === 0) {
@@ -182,6 +226,17 @@ class InvoiceService {
       resourceId: saved._id,
       amount: saved.total,
     });
+
+    // A caller creating the invoice already as 'sent' (not 'draft') means it
+    // should actually go out immediately. Don't let an email hiccup fail the
+    // create request that already succeeded — log and move on.
+    if (saved.status === 'sent' && saved.customerEmail) {
+      try {
+        await this.emailInvoiceToCustomer(userId, saved);
+      } catch (err) {
+        console.error(`Failed to email invoice ${saved.invoiceNumber} on create:`, err);
+      }
+    }
 
     return saved;
   }
@@ -360,6 +415,36 @@ class InvoiceService {
       actorRole,
       action: 'invoice.mark_sent',
       description: `Invoice ${saved.invoiceNumber} marked as sent`,
+      resourceId: saved._id,
+      amount: saved.total,
+    });
+
+    return saved;
+  }
+
+  async sendToCustomer(userId: string, invoiceId: string, actorId?: string): Promise<IInvoice> {
+    const invoice = await Invoice.findOne({ _id: invoiceId, userId });
+    if (!invoice) throw new Error('Invoice not found.');
+    if (!invoice.customerEmail) throw new ApiError(400, 'This invoice has no customer email on file.');
+
+    await this.emailInvoiceToCustomer(userId, invoice);
+
+    // A draft invoice being emailed to the customer has effectively been sent —
+    // flip its status the same way markAsSent() does. Invoices already past
+    // draft (sent/paid/overdue) just get re-emailed without a status change.
+    if (invoice.status === 'draft') {
+      invoice.status = 'sent';
+    }
+    const saved = await invoice.save();
+
+    const { actorName, actorRole } = await getActorInfo(actorId ?? userId);
+    await activityLogService.log({
+      businessOwnerId: userId,
+      actorId: actorId ?? userId,
+      actorName,
+      actorRole,
+      action: 'invoice.send_email',
+      description: `Invoice ${saved.invoiceNumber} emailed to ${invoice.customerEmail}`,
       resourceId: saved._id,
       amount: saved.total,
     });

@@ -104,7 +104,7 @@ const transactionActionSchema: Schema = {
   properties: {
     actionType: {
       type: Type.STRING,
-      enum: ["ADD_INCOME", "ADD_EXPENSE", "UPDATE_STOCK", "ADD_DEBT", "ADD_PRODUCT", "CHECK_STOCK", "CHECK_DEBTS", "MARK_DEBT_PAID", "CHECK_SUMMARY", "CHECK_TOP_PRODUCTS", "CHECK_TOP_CUSTOMERS", "CHECK_PAYMENT_METHODS", "UNKNOWN"],
+      enum: ["ADD_INCOME", "ADD_EXPENSE", "UPDATE_STOCK", "ADD_DEBT", "ADD_PRODUCT", "GENERATE_INVOICE", "CHECK_STOCK", "CHECK_DEBTS", "MARK_DEBT_PAID", "CHECK_SUMMARY", "CHECK_TOP_PRODUCTS", "CHECK_TOP_CUSTOMERS", "CHECK_PAYMENT_METHODS", "UNKNOWN"],
       description: "The matching business database operation type."
     },
     payload: {
@@ -133,8 +133,28 @@ const transactionActionSchema: Schema = {
 
         // Fields for Debt records only
         debtType: { type: Type.STRING, enum: ["THEY_OWE_ME", "I_OWE_THEM"], description: "THEY_OWE_ME if a customer owes the business (e.g. a credit sale, unpaid balance). I_OWE_THEM if the business owes the customer/supplier money." },
-        dueDate: { type: Type.STRING, description: "ISO date (YYYY-MM-DD) the debt is due, only if the user mentions a deadline." },
-        description: { type: Type.STRING, description: "Free-text note describing the debt, if extra detail is given." },
+        dueDate: { type: Type.STRING, description: "ISO date (YYYY-MM-DD) a deadline is due — for ADD_DEBT, when the debt is due; for GENERATE_INVOICE, when invoice payment is due. Only set if the user mentions a deadline; leave blank otherwise." },
+        description: { type: Type.STRING, description: "Free-text note — for ADD_DEBT, extra detail about the debt; for GENERATE_INVOICE, a note to print on the invoice. Only set if the user actually adds one." },
+
+        // Fields for GENERATE_INVOICE only
+        customerEmail: { type: Type.STRING, description: "For GENERATE_INVOICE only — the customer's email address, if mentioned, so the invoice can be emailed to them." },
+        customerPhone: { type: Type.STRING, description: "For GENERATE_INVOICE only — the customer's phone number, if mentioned." },
+        taxPercent: { type: Type.NUMBER, description: "For GENERATE_INVOICE only — the tax/VAT percentage to apply to the invoice (e.g. 7.5 for 7.5%), only if the user actually mentions tax/VAT. Leave blank otherwise — do not assume a default tax rate." },
+        discountValue: { type: Type.NUMBER, description: "For GENERATE_INVOICE only — the discount to apply, only if the user mentions one. Interpret together with discountType." },
+        discountType: { type: Type.STRING, enum: ["NGN", "percentage"], description: "For GENERATE_INVOICE only — whether discountValue is a flat currency amount (NGN) or a percentage of the subtotal. e.g. '10% off' or '10 percent discount' → percentage, discountValue 10. 'N500 off' or '500 discount' → NGN, discountValue 500. Only set if a discount was actually mentioned." },
+        invoiceItems: {
+          type: Type.ARRAY,
+          description: "For GENERATE_INVOICE only — the goods/services to list as invoice line items.",
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              description: { type: Type.STRING, description: "Name of the good or service line item." },
+              quantity:    { type: Type.NUMBER, description: "Quantity for this line item. Default to 1 if not stated." },
+              unitPrice:   { type: Type.NUMBER, description: "Price per unit for this line item, if the user stated one. Leave blank if not stated — the system will try to look it up from the product catalog by matching the description." },
+            },
+            required: ["description"]
+          }
+        },
 
         // Fields for summary / top-product / top-customer / payment-method queries
         period: { type: Type.STRING, enum: ["TODAY", "THIS_WEEK", "THIS_MONTH", "ALL_TIME"], description: "The relative time window the user is asking about. Only use this when NOT asking about a specific calendar date — use `date` instead for that. Default to ALL_TIME if neither is mentioned." },
@@ -173,8 +193,9 @@ CRITICAL RULES:
 10. If the user asks which product sells best/worst, has the highest/lowest revenue, is most/least popular, did well/poorly, or similar (e.g. "what product gave me the highest sales", "what's my best seller", "what did poorly today", "worst performing item"), output CHECK_TOP_PRODUCTS — NOT CHECK_SUMMARY, this is a different question. Set rank to BEST or WORST based on which direction they asked about (default BEST). Fill in period or date the same way as rule 9 if a time window was mentioned, otherwise leave both out. You do NOT know which product actually sold best/worst — do not guess a name in replyToUser, just acknowledge the question naturally.
 11. If the user asks which customer spent the most/least, paid the highest/lowest, or similar (e.g. "which customer paid the highest", "who's my biggest spender"), output CHECK_TOP_CUSTOMERS. Set rank to BEST or WORST the same way as rule 10. Fill in period or date if a time window was mentioned. You do NOT know the real numbers — do not guess a name in replyToUser.
 12. If the user asks about payment methods specifically — how many/much was paid via a method, or a breakdown across methods (e.g. "how many people paid with cash today", "how much came in via bank transfer this week", "break down my sales by payment method"), output CHECK_PAYMENT_METHODS — NOT CHECK_SUMMARY, this only concerns the payment-method split, not overall totals. Fill in paymentMethod only if the user asked about one specific method (Cash, Bank Transfer, Card); leave it blank for a full breakdown across all methods. Fill in period or date the same way as rule 9. You do NOT have the real numbers — do not guess in replyToUser.
-13. Never force a question into an actionType that doesn't actually match it just because it's the closest option — if none of the actions above genuinely fit what the user asked, use UNKNOWN instead of guessing.
-14. Only output UNKNOWN if, after considering the whole conversation, there is still no transaction or question of any kind in progress. If a transaction is in progress but a field (amount, product, customer, quantity, sellingPrice, costPrice) is still missing, output the correct actionType anyway with the fields you do have, and ask for the missing one in replyToUser — do NOT output UNKNOWN just because one field is missing.`;
+13. If the user asks you to generate/create/draft/write an invoice for someone (e.g. "generate an invoice for Jane for 2 chairs and a table", "create an invoice for John for consulting services, 50000, with 10% discount and 7.5% tax"), output GENERATE_INVOICE — this is a document-generation request, NOT a sale, so do NOT confuse it with ADD_INCOME and do NOT create an income record. customerName is REQUIRED. invoiceItems is REQUIRED — at least one line item, each with a description and, if stated, a quantity and unitPrice; if the user gives a price for an item, fill unitPrice, otherwise leave it blank and the system will look it up from the product catalog by name. Fill in dueDate only if a deadline was mentioned (resolve relative dates against today's real date above); fill in customerEmail/customerPhone/description(as invoice notes)/taxPercent/discountValue/discountType only if the user actually mentions them — none of these are required, and never invent a tax or discount the user didn't ask for.
+14. Never force a question into an actionType that doesn't actually match it just because it's the closest option — if none of the actions above genuinely fit what the user asked, use UNKNOWN instead of guessing.
+15. Only output UNKNOWN if, after considering the whole conversation, there is still no transaction or question of any kind in progress. If a transaction is in progress but a field (amount, product, customer, quantity, sellingPrice, costPrice, invoiceItems) is still missing, output the correct actionType anyway with the fields you do have, and ask for the missing one in replyToUser — do NOT output UNKNOWN just because one field is missing.`;
 }
 
 export interface ConversationTurn {

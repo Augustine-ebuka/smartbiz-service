@@ -22,6 +22,7 @@ export type ActivityAction =
   | 'invoice.update'
   | 'invoice.mark_paid'
   | 'invoice.mark_sent'
+  | 'invoice.send_email'
   | 'invoice.cancel'
   | 'invoice.delete'
   | 'expense_category.create'

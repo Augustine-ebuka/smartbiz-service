@@ -39,6 +39,7 @@ export interface ICompanyProfile {
   invoiceFooterNote?: string;
   subAccountCode?: string;
   merchantStatus?: boolean;
+  storeSlug?: string;        // URL-friendly public store identifier, e.g. "tundes-shop" for /store/tundes-shop
 }
 
 export type SubscriptionStatus = 'active' | 'expired' | 'cancelled';
@@ -246,6 +247,7 @@ const CompanyProfileSchema = new Schema<ICompanyProfile>(
     invoiceFooterNote:  { type: String, trim: true },
     subAccountCode:     { type: String, trim: true },
     merchantStatus:     { type: Boolean, default: false },
+    storeSlug:          { type: String, trim: true, lowercase: true, unique: true, sparse: true },
   },
   { _id: false }
 );

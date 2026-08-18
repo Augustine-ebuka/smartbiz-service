@@ -1,5 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import InvoiceService from '../services/invoice.service';
+import { buildInvoicePdf } from '../services/invoicePdfService';
+import { User } from '../models/user.model';
 
 // The frontend's invoice form uses its own field names (items, taxRate,
 // discount, discountType: 'flat'|'percent') that don't match the backend's
@@ -103,6 +105,36 @@ class InvoiceController {
       const userId  = req.businessOwnerId as string;
       const invoice = await InvoiceService.markAsSent(userId, req.params.id, req.userId as string);
       res.status(200).json({ success: true, message: 'Invoice marked as sent.', data: invoice });
+    } catch (error) { next(error); }
+  }
+
+  async downloadPdf(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId  = req.businessOwnerId as string;
+      const invoice = await InvoiceService.getById(userId, req.params.id);
+      const owner   = await User.findById(userId).select('settings.companyProfile');
+
+      const profile = owner?.settings?.companyProfile;
+      const pdfBuffer = await buildInvoicePdf(invoice, {
+        businessName:  profile?.businessName ?? 'Your Business',
+        email:         profile?.contact?.email,
+        phone:         profile?.contact?.phone,
+        bankName:      profile?.banking?.bankName,
+        accountName:   profile?.banking?.accountName,
+        accountNumber: profile?.banking?.accountNumber,
+      });
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${invoice.invoiceNumber}.pdf"`);
+      res.send(pdfBuffer);
+    } catch (error) { next(error); }
+  }
+
+  async sendEmail(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId  = req.businessOwnerId as string;
+      const invoice = await InvoiceService.sendToCustomer(userId, req.params.id, req.userId as string);
+      res.status(200).json({ success: true, message: 'Invoice emailed to customer.', data: invoice });
     } catch (error) { next(error); }
   }
 

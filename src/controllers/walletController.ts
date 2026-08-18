@@ -11,6 +11,7 @@ import inventoryService from '../services/inventory.service';
 import {Product} from '../models/product.model';
 import emailService from '../services/EmailService';
 import subscriptionService from '../services/subscriptionService';
+import { generateUniqueStoreSlug } from '../utils/slugify';
 /**
  * POST /reserved-accounts
  * Creates a dedicated virtual account for a customer.
@@ -224,6 +225,7 @@ export const createSubAccountHandler = async (
     console.log(subAccount);
 
     // if creation was created add subaccount code to user db
+  let storeSlug: string | undefined;
   if (subAccount?.subAccountCode) {
   const businessOwner = await User.findById(ownerId);
 
@@ -239,6 +241,14 @@ export const createSubAccountHandler = async (
       businessOwner.settings.companyProfile.subAccountCode = subAccount.subAccountCode;
       businessOwner.settings.companyProfile.merchantStatus = true;
 
+      // Give every new merchant a memorable /store/<slug> URL up front —
+      // they can still customize it later via the store-slug endpoint.
+      if (!businessOwner.settings.companyProfile.storeSlug) {
+        const nameSource = businessOwner.settings.companyProfile.businessName || `${businessOwner.firstName}'s Business`;
+        businessOwner.settings.companyProfile.storeSlug = await generateUniqueStoreSlug(nameSource, ownerId);
+      }
+      storeSlug = businessOwner.settings.companyProfile.storeSlug;
+
       // Tell Mongoose the nested object was modified (required for mixed/nested schemas)
       businessOwner.markModified('settings.companyProfile');
 
@@ -249,7 +259,7 @@ export const createSubAccountHandler = async (
 
     res.status(200).json({
       success: true,
-      data: subAccount,
+      data: { ...subAccount, storeSlug },
     });
   } catch (error) {
     next(error);

@@ -3,6 +3,7 @@ import { Product, IProduct, ProductType } from '../models/product.model';
 import { User } from '../models/user.model';
 import ApiError from '../utils/ApiError';
 import activityLogService from './activityLogService';
+import { generateUniqueStoreSlug } from '../utils/slugify';
 
 async function getActorInfo(userId: string): Promise<{ actorName: string; actorRole: string }> {
   const actor = await User.findById(userId).select('firstName lastName role');
@@ -144,11 +145,14 @@ class ProductService {
     });
   }
 
-  // public product of a business ownwer
-  async getPublicProducts(userId: string): Promise<any> {
+  // public product of a business owner — looked up by either the raw userId
+  // (legacy /store/:id links keep working) or the friendlier storeSlug.
+  async getPublicProducts(identifier: { userId?: string; slug?: string }): Promise<any> {
+    if (!identifier.userId && !identifier.slug) throw new Error('userId or slug is required.');
 
-    // check user
-    const businessOwner = await User.findOne({ _id: userId }); 
+    const businessOwner = identifier.slug
+      ? await User.findOne({ 'settings.companyProfile.storeSlug': identifier.slug })
+      : await User.findOne({ _id: identifier.userId });
     if (!businessOwner) throw new Error('User not found.');
 
 
@@ -164,6 +168,15 @@ class ProductService {
       // check if merchant status is true
       if (!businessOwner.settings.companyProfile.merchantStatus) throw new Error('User is not a merchant.');
 
+      // Backfill a slug for merchants who became one before storeSlug existed,
+      // so every store gets a friendly URL without a migration script.
+      if (!businessOwner.settings.companyProfile.storeSlug) {
+        const nameSource = businessOwner.settings.companyProfile.businessName || `${businessOwner.firstName}'s Business`;
+        businessOwner.settings.companyProfile.storeSlug = await generateUniqueStoreSlug(nameSource, businessOwner._id.toString());
+        businessOwner.markModified('settings.companyProfile');
+        await businessOwner.save();
+      }
+
       // return public products
       const products = await Product.find({ userId: businessOwner._id, isPublic: true }).sort({ createdAt: -1 });
       // return business info and products info
@@ -173,8 +186,26 @@ class ProductService {
       };
     }
 
-  
+
     }
+
+  // Lets a merchant customize their /store/<slug> URL. Normalizes whatever
+  // they type into a URL-safe slug and appends -2/-3/... if it's taken by
+  // someone else, rather than rejecting the request outright.
+  async updateStoreSlug(userId: string, desiredSlug: string): Promise<string> {
+    if (!desiredSlug || !desiredSlug.trim()) throw new ApiError(400, 'A store name is required.');
+
+    const slug = await generateUniqueStoreSlug(desiredSlug, userId);
+
+    const businessOwner = await User.findByIdAndUpdate(
+      userId,
+      { $set: { 'settings.companyProfile.storeSlug': slug } },
+      { new: true, runValidators: true }
+    );
+    if (!businessOwner) throw new Error('User not found.');
+
+    return slug;
+  }
 
   async togglePublic(userId: string, products: string[]): Promise<void> {
   if (!products || products.length === 0) {

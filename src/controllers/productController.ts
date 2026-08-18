@@ -80,13 +80,28 @@ async getAll(req: Request, res: Response, next: NextFunction) {
   
   async getPublicProducts(req: Request, res: Response, next: NextFunction) {
     try {
-      console.log(req.query.userId);
       const userId = req.query.userId as string;
-      const products = await ProductService.getPublicProducts(userId);
+      const slug   = req.query.slug as string;
+      const products = await ProductService.getPublicProducts({ userId, slug });
       res.status(200).json({
         success: true,
         message: 'Public products fetched successfully.',
         data: products,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateStoreSlug(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = (req as any).businessOwnerId as string;
+      const { slug } = req.body as { slug: string };
+      const storeSlug = await ProductService.updateStoreSlug(userId, slug);
+      res.status(200).json({
+        success: true,
+        message: 'Store URL updated successfully.',
+        data: { storeSlug },
       });
     } catch (error) {
       next(error);
