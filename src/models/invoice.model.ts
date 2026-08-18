@@ -91,7 +91,7 @@ const RecurringSchema = new Schema<IRecurring>(
 
 const InvoiceSchema = new Schema<IInvoice>(
   {
-    invoiceNumber:   { type: String, unique: true },
+    invoiceNumber:   { type: String },
     userId:          { type: String, required: true, index: true },
     sourceTransactionId: { type: String, index: true },
 
@@ -133,6 +133,10 @@ InvoiceSchema.pre('save', async function (next) {
   next();
 });
 
+// invoiceNumber is only generated to be unique *within* a business (see the
+// pre-save hook above) — the constraint has to match that scope, or two
+// different users whose Nth invoice lands on the same number will collide.
+InvoiceSchema.index({ userId: 1, invoiceNumber: 1 }, { unique: true });
 InvoiceSchema.index({ userId: 1, status: 1 });
 InvoiceSchema.index({ userId: 1, dueDate: 1 });
 InvoiceSchema.index({ userId: 1, customerId: 1 });

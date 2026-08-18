@@ -45,6 +45,29 @@ async function dropLegacyUserOtpTtlIndexes() {
   }
 }
 
+// invoiceNumber used to be globally unique instead of unique-per-business,
+// which meant two different users could collide on the same auto-generated
+// number (e.g. both users' first invoice computing to "INV-00001"). The
+// schema now declares a compound { userId, invoiceNumber } unique index
+// instead — this drops the stale global one left over in MongoDB from before,
+// since Mongoose never migrates/removes old indexes on its own.
+async function dropLegacyGlobalInvoiceNumberIndex() {
+  const invoicesCollection = mongoose.connection.collection('invoices');
+  const indexes = await invoicesCollection.indexes();
+
+  const legacyIndex = indexes.find((index) => {
+    const keys = Object.keys(index.key ?? {});
+    return keys.length === 1 && index.key?.invoiceNumber === 1 && index.unique;
+  });
+
+  if (!legacyIndex?.name) {
+    return;
+  }
+
+  await invoicesCollection.dropIndex(legacyIndex.name);
+  console.log(`Dropped legacy global-unique index on invoices.${legacyIndex.name}`);
+}
+
 app.use(express.json());
 
 const webhookBasePaths = [APP_PREFIX_PATH, '/'];
@@ -132,6 +155,7 @@ async function startServer() {
     } as mongoose.ConnectOptions);
 
     await dropLegacyUserOtpTtlIndexes();
+    await dropLegacyGlobalInvoiceNumberIndex();
 
     console.log('Connected to MongoDB successfully');
 
