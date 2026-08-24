@@ -70,6 +70,12 @@ IncomeSchema.pre('save', async function (next) {
   next();
 });
 
+// receiptId is only generated to be unique *within* a business (see the
+// pre-save hook above), so uniqueness has to be enforced per-business too —
+// a bare unique index on receiptId alone would reject e.g. two different
+// businesses both having a "RCT-00002".
+IncomeSchema.index({ userId: 1, receiptId: 1 }, { unique: true });
+
 IncomeSchema.index({ userId: 1, date: -1 });
 IncomeSchema.index({ userId: 1, customerId: 1 });
 IncomeSchema.index({ userId: 1, productId: 1 });

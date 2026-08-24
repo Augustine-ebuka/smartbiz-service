@@ -68,6 +68,27 @@ async function dropLegacyGlobalInvoiceNumberIndex() {
   console.log(`Dropped legacy global-unique index on invoices.${legacyIndex.name}`);
 }
 
+// Same issue as invoiceNumber above, but for incomes.receiptId — it used to
+// be globally unique, so two different users' second-ever sale (both
+// computing to "RCT-00002") collide on the stale global index even though
+// the schema now declares a compound { userId, receiptId } unique index.
+async function dropLegacyGlobalReceiptIdIndex() {
+  const incomesCollection = mongoose.connection.collection('incomes');
+  const indexes = await incomesCollection.indexes();
+
+  const legacyIndex = indexes.find((index) => {
+    const keys = Object.keys(index.key ?? {});
+    return keys.length === 1 && index.key?.receiptId === 1 && index.unique;
+  });
+
+  if (!legacyIndex?.name) {
+    return;
+  }
+
+  await incomesCollection.dropIndex(legacyIndex.name);
+  console.log(`Dropped legacy global-unique index on incomes.${legacyIndex.name}`);
+}
+
 app.use(express.json());
 
 const webhookBasePaths = [APP_PREFIX_PATH, '/'];
@@ -156,6 +177,7 @@ async function startServer() {
 
     await dropLegacyUserOtpTtlIndexes();
     await dropLegacyGlobalInvoiceNumberIndex();
+    await dropLegacyGlobalReceiptIdIndex();
 
     console.log('Connected to MongoDB successfully');
 
