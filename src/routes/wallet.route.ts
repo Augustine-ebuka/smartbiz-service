@@ -32,10 +32,10 @@ router.get('/sub-accounts', authenticateToken, resolveBusinessOwner, requireOwne
 // GET /banks-list
 router.get('/banks-list', fetchBanksListHandler);
 // PUT /sub-accounts/:subAccountCode
-router.put('/sub-accounts/:subAccountCode', updateSubAccountHandler);
+router.put('/sub-accounts/:subAccountCode', authenticateToken, resolveBusinessOwner, requireOwner, updateSubAccountHandler);
 
 // DELETE /sub-accounts/:subAccountCode
-router.delete('/sub-accounts/:subAccountCode', deleteSubAccountHandler);
+router.delete('/sub-accounts/:subAccountCode', authenticateToken, resolveBusinessOwner, requireOwner, deleteSubAccountHandler);
 
 
 export default router;

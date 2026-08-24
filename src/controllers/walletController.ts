@@ -12,6 +12,11 @@ import {Product} from '../models/product.model';
 import emailService from '../services/EmailService';
 import subscriptionService from '../services/subscriptionService';
 import { generateUniqueStoreSlug } from '../utils/slugify';
+
+// Sub-accounts always receive this share of split payments; the main
+// account keeps the rest. Fixed server-side — client input is ignored.
+const SUB_ACCOUNT_SPLIT_PERCENTAGE = 96;
+
 /**
  * POST /reserved-accounts
  * Creates a dedicated virtual account for a customer.
@@ -77,12 +82,14 @@ export const verifyBankAccountHandler = async (
 /**
  * POST /transactions/initialize
  * Body: { amount, customerName, customerEmail, redirectUrl, paymentDescription?,
- *         paymentReference?, splitConfig? }
+ *         paymentReference?, merchantUserId? }
  *
  * Initializes a payment and returns a checkoutUrl — redirect the user's
- * browser there to complete payment on Monnify's hosted window. Pass
- * `splitConfig` to route slices of the payment to other sub-accounts
- * (e.g. vendor payouts) automatically at settlement.
+ * browser there to complete payment on Monnify's hosted window. If the
+ * merchant (merchantUserId) has a Monnify sub-account on file, the split
+ * is built server-side from it at SUB_ACCOUNT_SPLIT_PERCENTAGE — this
+ * endpoint is public (no auth), so client-supplied split config is never
+ * trusted or accepted.
  */
 export const initializeTransactionHandler = async (
   req: Request,
@@ -99,7 +106,6 @@ export const initializeTransactionHandler = async (
       customerPhone,
       redirectUrl,
       paymentDescription,
-      splitConfig,
       address,
       products,
       merchantUserId
@@ -110,7 +116,6 @@ export const initializeTransactionHandler = async (
       customerPhone?: string;
       redirectUrl?: string;
       paymentDescription?: string;
-      splitConfig?: SplitConfigEntry[];
       address?: string;
       products?: any[];
       merchantUserId?: string;
@@ -127,6 +132,17 @@ export const initializeTransactionHandler = async (
     // Always generate server-side — never trust client-supplied references
     const paymentReference = `PF-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
+    // Build the split from the merchant's own subAccountCode on file — never
+    // from client input — so the service fee can't be tampered with.
+    let incomeSplitConfig: SplitConfigEntry[] | undefined;
+    if (merchantUserId) {
+      const merchant = await User.findById(merchantUserId).select('settings.companyProfile.subAccountCode');
+      const subAccountCode = merchant?.settings?.companyProfile?.subAccountCode;
+      if (subAccountCode) {
+        incomeSplitConfig = [{ subAccountCode, feePercentage: SUB_ACCOUNT_SPLIT_PERCENTAGE }];
+      }
+    }
+
     const transaction = await initializeTransaction({
       amount,
       customerName,
@@ -134,7 +150,7 @@ export const initializeTransactionHandler = async (
       redirectUrl,
       paymentDescription: paymentDescription ?? `Payment from ${customerName}`,
       paymentReference,
-      incomeSplitConfig: splitConfig,
+      incomeSplitConfig,
     });
 
     // Find or create customer — always reassign so _id is always available
@@ -181,10 +197,12 @@ export const initializeTransactionHandler = async (
  
 /**
  * POST /sub-accounts
- * Body: { accountNumber, bankCode, email, defaultSplitPercentage? }
+ * Body: { accountNumber, bankCode, email }
  *
  * Registers a bank account as a Monnify sub-account so it can receive a
  * slice of future payments via `splitConfig` on transaction initialization.
+ * The split percentage is fixed server-side (SUB_ACCOUNT_SPLIT_PERCENTAGE)
+ * and not accepted from the client.
  */
 export const createSubAccountHandler = async (
   req: any,
@@ -196,15 +214,12 @@ export const createSubAccountHandler = async (
       accountNumber,
       bankCode,
       email,
-      defaultSplitPercentage,
-      
     }: {
       accountNumber?: string;
       bankCode?: string;
       email?: string;
-      defaultSplitPercentage?: number;
     } = req.body ?? {};
- 
+
     if (!accountNumber || !bankCode || !email) {
       res.status(400).json({
         success: false,
@@ -214,12 +229,12 @@ export const createSubAccountHandler = async (
     }
      const ownerId = req.businessOwnerId as string;
      console.log(ownerId);
- 
+
     const subAccount = await createMerchantSubAccount({
       accountNumber,
       bankCode,
       email,
-      defaultSplitPercentage,
+      defaultSplitPercentage: SUB_ACCOUNT_SPLIT_PERCENTAGE,
     });
 
     console.log(subAccount);
@@ -271,15 +286,19 @@ export const createSubAccountHandler = async (
  * DELETE /sub-accounts/:subAccountCode
  * Permanently deletes a sub-account. Cannot be undone — make sure no
  * active `splitConfig` still references this subAccountCode first.
+ *
+ * Scoped to the caller's own subAccountCode (stored on their user doc) so
+ * one business can't delete another business's Monnify sub-account.
  */
 export const deleteSubAccountHandler = async (
-  req: Request,
+  req: any,
   res: Response,
   next: NextFunction,
 ): Promise<void> => {
   try {
     const { subAccountCode } = req.params;
- 
+    const ownerId = req.businessOwnerId as string;
+
     if (!subAccountCode) {
       res.status(400).json({
         success: false,
@@ -287,9 +306,23 @@ export const deleteSubAccountHandler = async (
       });
       return;
     }
- 
+
+    const businessOwner = await User.findById(ownerId);
+    if (!businessOwner || businessOwner.settings?.companyProfile?.subAccountCode !== subAccountCode) {
+      res.status(403).json({
+        success: false,
+        error: 'You do not have permission to delete this sub-account',
+      });
+      return;
+    }
+
     await deleteMerchantSubAccount(subAccountCode);
- 
+
+    businessOwner.settings!.companyProfile!.subAccountCode = undefined;
+    businessOwner.settings!.companyProfile!.merchantStatus = false;
+    businessOwner.markModified('settings.companyProfile');
+    await businessOwner.save();
+
     res.status(200).json({
       success: true,
       message: 'Sub-account deleted successfully',
@@ -299,16 +332,36 @@ export const deleteSubAccountHandler = async (
   }
 };
 
+/**
+ * GET /sub-accounts
+ * Returns only the caller's own sub-account (looked up by the
+ * subAccountCode stored on their user doc), not every merchant's
+ * sub-accounts on the Monnify account.
+ */
 export const fetchSubAccountsHandler = async (
-  req: Request,
+  req: any,
   res: Response,
   next: NextFunction,
 ): Promise<void> => {
   try {
+    const ownerId = req.businessOwnerId as string;
+    const businessOwner = await User.findById(ownerId).select('settings.companyProfile.subAccountCode');
+    const ownSubAccountCode = businessOwner?.settings?.companyProfile?.subAccountCode;
+
+    if (!ownSubAccountCode) {
+      res.status(200).json({ success: true, data: [] });
+      return;
+    }
+
     const subAccounts = await fetchSubAccounts();
+    const list = Array.isArray(subAccounts) ? subAccounts : [];
+    const ownSubAccount = list.filter(
+      (account: any) => account?.subAccountCode === ownSubAccountCode,
+    );
+
     res.status(200).json({
       success: true,
-      data: subAccounts,
+      data: ownSubAccount,
     });
   } catch (error) {
     next(error);
@@ -333,47 +386,59 @@ export const fetchBanksListHandler = async (
 
 /**
  * PUT /sub-accounts/:subAccountCode
- * Body: { accountNumber, bankCode, email, defaultSplitPercentage, currencyCode? }
+ * Body: { accountNumber, bankCode, email, currencyCode? }
  *
- * Updates an existing sub-account's bank details, email, or split
- * percentage. The subAccountCode comes from the URL here for a cleaner
- * REST shape; the service maps it into the body Monnify expects.
+ * Updates an existing sub-account's bank details or email. The split
+ * percentage is fixed server-side (SUB_ACCOUNT_SPLIT_PERCENTAGE) and not
+ * accepted from the client. The subAccountCode comes from the URL here for
+ * a cleaner REST shape; the service maps it into the body Monnify expects.
+ *
+ * Scoped to the caller's own subAccountCode (stored on their user doc) so
+ * one business can't update another business's Monnify sub-account.
  */
 export const updateSubAccountHandler = async (
-  req: Request,
+  req: any,
   res: Response,
   next: NextFunction,
 ): Promise<void> => {
   try {
     const { subAccountCode } = req.params;
+    const ownerId = req.businessOwnerId as string;
     const {
       accountNumber,
       bankCode,
       email,
-      defaultSplitPercentage,
       currencyCode,
     }: {
       accountNumber?: string;
       bankCode?: string;
       email?: string;
-      defaultSplitPercentage?: number;
       currencyCode?: string;
     } = req.body ?? {};
- 
-    if (!subAccountCode || !accountNumber || !bankCode || !email || defaultSplitPercentage === undefined) {
+
+    if (!subAccountCode || !accountNumber || !bankCode || !email) {
       res.status(400).json({
         success: false,
-        error: 'subAccountCode, accountNumber, bankCode, email and defaultSplitPercentage are required',
+        error: 'subAccountCode, accountNumber, bankCode and email are required',
       });
       return;
     }
- 
+
+    const businessOwner = await User.findById(ownerId).select('settings.companyProfile.subAccountCode');
+    if (businessOwner?.settings?.companyProfile?.subAccountCode !== subAccountCode) {
+      res.status(403).json({
+        success: false,
+        error: 'You do not have permission to update this sub-account',
+      });
+      return;
+    }
+
     const subAccount = await updateMerchantSubAccount({
       subAccountCode,
       accountNumber,
       bankCode,
       email,
-      defaultSplitPercentage,
+      defaultSplitPercentage: SUB_ACCOUNT_SPLIT_PERCENTAGE,
       currencyCode,
     });
  
