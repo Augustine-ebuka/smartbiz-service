@@ -10,6 +10,7 @@ import {
   updateSubAccountHandler,
   handleMonnifyWebhook,
   getTransactionStatusHandler,
+  getMonnifyTransactionHandler,
 } from '../controllers/walletController';
 import { authenticateToken } from '../middlewares/authMiddleware';
 import { resolveBusinessOwner, requireOwner } from '../middlewares/businessOwnerMiddleware';
@@ -30,6 +31,15 @@ router.post('/transactions/initialize', initializeTransactionHandler);
 // has actually landed and income was recorded, instead of assuming success
 // from the redirect alone.
 router.get('/transactions/status/:reference', getTransactionStatusHandler);
+
+// Authenticated — full live transaction detail straight from Monnify,
+// scoped to the caller's own business.
+router.get(
+  '/transactions/monnify/:transactionReference',
+  authenticateToken,
+  resolveBusinessOwner,
+  getMonnifyTransactionHandler,
+);
 
 // POST /sub-accounts
 router.post('/sub-accounts', authenticateToken, resolveBusinessOwner, requireOwner, createSubAccountHandler);

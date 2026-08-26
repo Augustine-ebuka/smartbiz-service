@@ -110,6 +110,10 @@ export interface CheckoutTransactionStatusResponse {
   paymentStatus: string;
   amountPaid: number;
   customer?: { email?: string; name?: string };
+  // Monnify returns additional fields (fees, settlement amount, payment
+  // method, paidOn, etc.) beyond the ones above — pass them through untyped
+  // rather than stripping them, for callers that want the full record.
+  [key: string]: unknown;
 }
 
 interface MonnifyEnvelope<T> {

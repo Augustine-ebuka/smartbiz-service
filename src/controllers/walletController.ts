@@ -276,6 +276,54 @@ export const getTransactionStatusHandler = async (
   }
 };
 
+/**
+ * GET /transactions/monnify/:transactionReference
+ *
+ * Authenticated — returns the full live transaction record straight from
+ * Monnify (payment method, fees, settlement amount, paidOn, customer info,
+ * etc.), not just the slim { status, amount, references } shape the public
+ * poll endpoint exposes for the anonymous checkout page.
+ *
+ * Scoped to the caller's own business: the local Transaction is looked up
+ * first so one business owner can't pull another's Monnify transaction
+ * data just by guessing/knowing a reference.
+ */
+export const getMonnifyTransactionHandler = async (
+  req: any,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const { transactionReference } = req.params;
+    const ownerId = req.businessOwnerId as string;
+
+    if (!transactionReference) {
+      res.status(400).json({
+        success: false,
+        error: 'transactionReference is required',
+      });
+      return;
+    }
+
+    const transaction = await Transaction.findOne({ trans_ref: transactionReference }).select('user_id');
+    if (!transaction || transaction.user_id.toString() !== ownerId) {
+      res.status(404).json({
+        success: false,
+        error: 'Transaction not found',
+      });
+      return;
+    }
+
+    const monnifyData = await getCheckoutTransactionStatus(transactionReference);
+
+    res.status(200).json({
+      success: true,
+      data: monnifyData,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 
 /**
  * POST /sub-accounts
