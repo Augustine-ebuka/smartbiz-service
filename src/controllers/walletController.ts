@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
-import { createReservedAccount, initializeTransaction, verifyBankAccount, 
-  createMerchantSubAccount, deleteMerchantSubAccount, fetchSubAccounts, fetchBanksList, updateMerchantSubAccount } from '../utils/monnifyService';
+import { createReservedAccount, initializeTransaction, verifyBankAccount,
+  createMerchantSubAccount, deleteMerchantSubAccount, fetchSubAccounts, fetchBanksList, updateMerchantSubAccount,
+  getCheckoutTransactionStatus } from '../utils/monnifyService';
 import type { SplitConfigEntry } from '../utils/monnifyService';
 import { User } from '../models/user.model';
 import crypto from 'crypto';
@@ -164,6 +165,11 @@ export const initializeTransactionHandler = async (
         phone:  customerPhone,
         address,
       });
+    } else if (address && address !== customer.address) {
+      // Keep the customer's address current with their latest delivery
+      // address rather than leaving it stuck on whatever they entered first.
+      customer.address = address;
+      await customer.save();
     }
 
     // Map fields explicitly — don't dump the entire Monnify response into `data`
@@ -194,7 +200,83 @@ export const initializeTransactionHandler = async (
   }
 };
 
- 
+/**
+ * GET /transactions/status/:reference
+ * `reference` may be either the paymentReference or transactionReference
+ * returned by /transactions/initialize.
+ *
+ * Public/unauthenticated — the caller here is the anonymous customer's
+ * checkout callback page, not a logged-in merchant. Income is only ever
+ * created inside handleMonnifyWebhook once Monnify confirms payment, so the
+ * frontend must poll this (rather than assuming success from the redirect
+ * alone) to know whether that webhook has actually landed yet.
+ */
+export const getTransactionStatusHandler = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const { reference } = req.params;
+
+    if (!reference) {
+      res.status(400).json({
+        success: false,
+        error: 'reference is required',
+      });
+      return;
+    }
+
+    let transaction = await Transaction.findOne({
+      $or: [{ payment_reference: reference }, { trans_ref: reference }],
+    });
+
+    if (!transaction) {
+      res.status(404).json({
+        success: false,
+        error: 'Transaction not found',
+      });
+      return;
+    }
+
+    // The webhook may not have landed yet — unreachable on local dev,
+    // delayed, or dropped in production — so ask Monnify directly for the
+    // live status rather than leaving the frontend polling a stale
+    // 'pending' forever.
+    if (transaction.status === 'pending') {
+      try {
+        const liveStatus = await getCheckoutTransactionStatus(transaction.trans_ref);
+        if (liveStatus.paymentStatus === 'PAID') {
+          const finalized = await finalizeSuccessfulPayment({
+            transactionReference: transaction.trans_ref,
+            paymentReference: liveStatus.paymentReference ?? transaction.payment_reference,
+            amountPaid: liveStatus.amountPaid,
+            customerName: liveStatus.customer?.name,
+            customerEmail: liveStatus.customer?.email,
+          });
+          if (finalized) transaction = finalized;
+        }
+      } catch (err) {
+        console.error('[Transaction Status] Monnify requery failed:', (err as Error).message);
+        // fall through and report the last known local status
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        status:                transaction.status,
+        amount:                transaction.amount,
+        paymentReference:      transaction.payment_reference,
+        transactionReference:  transaction.trans_ref,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+
 /**
  * POST /sub-accounts
  * Body: { accountNumber, bankCode, email }
@@ -451,6 +533,133 @@ export const updateSubAccountHandler = async (
   }
 };
 
+interface FinalizePaymentParams {
+  transactionReference: string;
+  paymentReference: string;
+  amountPaid: number;
+  customerName?: string;
+  customerEmail?: string;
+}
+
+/**
+ * Marks a transaction successful and runs the post-payment side effects —
+ * income + stock deduction for catalog sales, plan activation for
+ * subscriptions, owner/customer emails. Shared by the webhook handler and
+ * the status-poll fallback (getTransactionStatusHandler) so both paths run
+ * identical logic instead of two copies that can drift apart.
+ *
+ * Idempotent: returns the transaction as-is if it's already 'successful',
+ * since Monnify retries webhook delivery and the poll fallback may also
+ * race the webhook.
+ */
+const finalizeSuccessfulPayment = async ({
+  transactionReference,
+  paymentReference,
+  amountPaid,
+  customerName,
+  customerEmail,
+}: FinalizePaymentParams) => {
+  const transaction = await Transaction.findOne({ trans_ref: transactionReference });
+  if (!transaction) return null;
+
+  if (transaction.status === 'successful') return transaction;
+
+  transaction.status = 'successful';
+  transaction.payment_reference = paymentReference;
+  await transaction.save();
+
+  // Subscription upgrades aren't catalog sales — activate the plan and
+  // skip the income/stock/email flow below, which assumes real products.
+  if (transaction.purpose === 'subscription' && transaction.metadata?.planId) {
+    await subscriptionService.activatePlan(
+      transaction.user_id.toString(),
+      transaction.metadata.planId,
+      transactionReference
+    );
+    console.log(`[Subscription] Activated ${transaction.metadata.planId} for user ${transaction.user_id}`);
+    return transaction;
+  }
+
+  // Create an income record for each product and deduct stock
+  const products = transaction.products || [];
+  for (const product of products) {
+    const income = await Income.create({
+      userId: transaction.user_id,
+      paymentMethod: 'monnify',
+      productId: product.product_id,
+      unit: product.quantity,
+      amount: product.quantity * product.price,
+      customerId: transaction.customer_id,
+    });
+    const { isLowStock, stockAfter } = await inventoryService.deductForSale(
+      transaction.user_id.toString(),
+      product.product_id.toString(),
+      product.quantity,
+      income._id,
+      transaction.user_id.toString(),
+      "Monnify"
+    );
+    console.log({ isLowStock, stockAfter });
+  }
+
+  // Fetch owner details for the emails
+  const owner    = await User.findById(transaction.user_id).select('firstName email settings');
+  const customer = await Customer.findById(transaction.customer_id).select('name email');
+
+  const businessName  = owner?.settings?.companyProfile?.businessName ?? 'Your Business';
+  const businessEmail = owner?.settings?.companyProfile?.contact?.email;
+  const businessPhone = owner?.settings?.companyProfile?.contact?.phone;
+
+  // Build product list for email. The checkout payload only ever sends
+  // { product_id, quantity, price } — never a name — so look names up from
+  // the catalog rather than falling back to the literal string 'Product'.
+  const productIds = transaction.products.map((p: any) => p.product_id).filter(Boolean);
+  const productDocs = await Product.find({ _id: { $in: productIds } }).select('name');
+  const productNameById = new Map(productDocs.map((doc: any) => [doc._id.toString(), doc.name]));
+
+  const emailProducts = transaction.products.map((p: any) => ({
+    name:     p.name ?? productNameById.get(p.product_id?.toString()) ?? 'Product',
+    quantity: p.quantity ?? 1,
+    price:    p.price    ?? 0,
+  }));
+
+  const paidAt = new Date();
+
+  // 1 — Notify the business owner
+  if (owner?.email) {
+    emailService.sendSaleNotification({
+      to:               owner.email,
+      ownerName:        owner.firstName,
+      businessName,
+      customerName:     customer?.name ?? customerName ?? 'Customer',
+      products:         emailProducts,
+      totalAmount:      amountPaid,
+      paymentReference,
+      paidAt,
+    }).catch(err => console.error('[Email] Sale notification failed:', err));
+  }
+
+  // 2 — Send receipt to the customer
+  const resolvedCustomerEmail = customer?.email ?? customerEmail;
+  if (resolvedCustomerEmail) {
+    emailService.sendPurchaseReceipt({
+      to:               resolvedCustomerEmail,
+      customerName:     customer?.name ?? customerName ?? 'Customer',
+      businessName,
+      businessEmail,
+      businessPhone,
+      products:         emailProducts,
+      totalAmount:      amountPaid,
+      paymentReference,
+      paidAt,
+    }).catch(err => console.error('[Email] Purchase receipt failed:', err));
+  }
+
+  console.log(`Payment confirmed for reference: ${paymentReference}, Amount: ${amountPaid}`);
+
+  return transaction;
+};
+
 export const handleMonnifyWebhook = async (req: Request, res: Response): Promise<void> => {
   try {
     const monnifySignature = req.headers['monnify-signature'];
@@ -472,117 +681,22 @@ export const handleMonnifyWebhook = async (req: Request, res: Response): Promise
 
     // 2. Check for successful transaction event
     if (eventType === 'SUCCESSFUL_TRANSACTION') {
-      const { paymentReference, amountPaid, paymentStatus, transactionReference } = eventData;
+      const { paymentReference, amountPaid, paymentStatus, transactionReference, customerName, customerEmail } = eventData;
 
       if (paymentStatus === 'PAID') {
-        /*
-          👉 DATABASE LOGIC:
-          1. Find the order/cart matching `paymentReference`.
-          2. Check if the order is already marked as PAID (to avoid duplicate processing).
-          3. Mark order as PAID in MongoDB.
-          4. Reduce inventory/stock or trigger order fulfillment.
-        */
+        const transaction = await finalizeSuccessfulPayment({
+          transactionReference,
+          paymentReference,
+          amountPaid,
+          customerName,
+          customerEmail,
+        });
 
-          const transaction = await Transaction.findOne({ trans_ref: transactionReference });
-          if (!transaction) {
-            res.status(404).json({ message: 'Transaction not found' });
-            return;
-          }
-          // Update transaction status and payment reference
-          transaction.status = 'successful';
-          transaction.payment_reference = paymentReference;
-          await transaction.save();
-
-          // Subscription upgrades aren't catalog sales — activate the plan and
-          // skip the income/stock/email flow below, which assumes real products.
-          if (transaction.purpose === 'subscription' && transaction.metadata?.planId) {
-            await subscriptionService.activatePlan(
-              transaction.user_id.toString(),
-              transaction.metadata.planId,
-              transactionReference
-            );
-            console.log(`[Subscription] Activated ${transaction.metadata.planId} for user ${transaction.user_id}`);
-            res.status(200).send('Webhook Received');
-            return;
-          }
-
-          // then creat an income record in db
-          // loop through products and create an income record for each product
-          const products = transaction.products || [];
-          for (const product of products) {
-            const income = await Income.create({
-              userId: transaction.user_id,
-              paymentMethod: 'monnify',
-              productId: product.product_id,
-              unit: product.quantity,
-              amount: product.quantity * product.price,
-              customerId: transaction.customer_id,
-            });
-             const { isLowStock, stockAfter } = await inventoryService.deductForSale(
-                    transaction.user_id.toString(),
-                    product.product_id.toString(),
-                    product.quantity,
-                    income._id,
-                    transaction.user_id.toString(),
-                    "Monnify"
-                  );
-                  console.log({isLowStock, stockAfter});
-          }
-          // After your for loop that creates income records — add this:
-
-        // Fetch owner details for the emails
-        const owner    = await User.findById(transaction.user_id).select('firstName email settings');
-        const customer = await Customer.findById(transaction.customer_id).select('name email');
-
-        const businessName  = owner?.settings?.companyProfile?.businessName ?? 'Your Business';
-        const businessEmail = owner?.settings?.companyProfile?.contact?.email;
-        const businessPhone = owner?.settings?.companyProfile?.contact?.phone;
-
-        // Build product list for email (from transaction.products)
-        const emailProducts = transaction.products.map((p: any) => ({
-          name:     p.name     ?? 'Product',
-          quantity: p.quantity ?? 1,
-          price:    p.price    ?? 0,
-        }));
-
-        const paidAt = new Date();
-
-        // 1 — Notify the business owner
-        if (owner?.email) {
-          emailService.sendSaleNotification({
-            to:               owner.email,
-            ownerName:        owner.firstName,
-            businessName,
-            customerName:     customer?.name ?? eventData.customerName,
-            products:         emailProducts,
-            totalAmount:      amountPaid,
-            paymentReference: paymentReference,
-            paidAt,
-          }).catch(err => console.error('[Email] Sale notification failed:', err));
+        if (!transaction) {
+          res.status(404).json({ message: 'Transaction not found' });
+          return;
         }
-
-        // 2 — Send receipt to the customer
-        const customerEmail = customer?.email ?? eventData.customerEmail;
-        if (customerEmail) {
-          emailService.sendPurchaseReceipt({
-            to:               customerEmail,
-            customerName:     customer?.name ?? eventData.customerName,
-            businessName,
-            businessEmail,
-            businessPhone,
-            products:         emailProducts,
-            totalAmount:      amountPaid,
-            paymentReference: paymentReference,
-            paidAt,
-          }).catch(err => console.error('[Email] Purchase receipt failed:', err));
-        }
-
-
-        console.log(`Payment confirmed for reference: ${paymentReference}, Amount: ${amountPaid}`);
       }
-
-      // After your for loop that creates income records — add this:
-
     }
 
     // Always respond with 200 OK so Monnify knows you received the webhook

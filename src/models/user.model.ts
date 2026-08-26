@@ -40,6 +40,9 @@ export interface ICompanyProfile {
   subAccountCode?: string;
   merchantStatus?: boolean;
   storeSlug?: string;        // URL-friendly public store identifier, e.g. "tundes-shop" for /store/tundes-shop
+  deliveryEnabled?: boolean;
+  deliveryFee?: number;
+  freeDeliveryThreshold?: number;
 }
 
 export type SubscriptionStatus = 'active' | 'expired' | 'cancelled';
@@ -248,6 +251,9 @@ const CompanyProfileSchema = new Schema<ICompanyProfile>(
     subAccountCode:     { type: String, trim: true },
     merchantStatus:     { type: Boolean, default: false },
     storeSlug:          { type: String, trim: true, lowercase: true, unique: true, sparse: true },
+    deliveryEnabled:        { type: Boolean, default: false },
+    deliveryFee:             { type: Number, default: 0, min: 0 },
+    freeDeliveryThreshold:  { type: Number, min: 0 },
   },
   { _id: false }
 );

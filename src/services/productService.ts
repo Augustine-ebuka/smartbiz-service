@@ -179,9 +179,30 @@ class ProductService {
 
       // return public products
       const products = await Product.find({ userId: businessOwner._id, isPublic: true }).sort({ createdAt: -1 });
+
+      // Public/anonymous response — only what the storefront/checkout actually
+      // need. The full companyProfile also holds taxId, registrationNumber,
+      // legalName, industry and raw banking details (bankName/accountNumber/
+      // routingOrSwift); those must never go out on an unauthenticated endpoint.
+      const profile = businessOwner.settings.companyProfile;
+      const businessOwnerPublic = {
+        businessName: profile.businessName,
+        currency: profile.currency,
+        logoUrl: profile.logoUrl,
+        subAccountCode: profile.subAccountCode,
+        storeSlug: profile.storeSlug,
+        deliveryEnabled: profile.deliveryEnabled,
+        deliveryFee: profile.deliveryFee,
+        freeDeliveryThreshold: profile.freeDeliveryThreshold,
+        contact: {
+          email: profile.contact?.email,
+          phone: profile.contact?.phone,
+        },
+      };
+
       // return business info and products info
       return {
-        businessOwner: businessOwner.settings.companyProfile,
+        businessOwner: businessOwnerPublic,
         products,
       };
     }

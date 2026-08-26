@@ -103,6 +103,15 @@ export interface InitializeTransactionResponse {
   enabledPaymentMethod: string[];
 }
 
+export interface CheckoutTransactionStatusResponse {
+  transactionReference: string;
+  paymentReference: string;
+  /** e.g. 'PAID' | 'PENDING' | 'FAILED' | 'OVERPAID' | 'PARTIALLY_PAID' */
+  paymentStatus: string;
+  amountPaid: number;
+  customer?: { email?: string; name?: string };
+}
+
 interface MonnifyEnvelope<T> {
   requestSuccessful: boolean;
   responseMessage: string;
@@ -399,4 +408,17 @@ export const initializeTransaction = ({
     'Failed to initialize transaction',
   );
 
-  
+/**
+ * Queries Monnify directly for a checkout transaction's live status —
+ * server-to-server, independent of the webhook. Used as a fallback when the
+ * webhook hasn't (yet) landed, e.g. on local dev where Monnify can't reach
+ * localhost, or in production if delivery is delayed/dropped.
+ */
+export const getCheckoutTransactionStatus = (transactionReference: string) =>
+  request<CheckoutTransactionStatusResponse>(
+    // transactionReference contains '|' (e.g. "MNFY|20260826|000123456"), which
+    // is not a valid unescaped URL path character — must be percent-encoded.
+    () => client.get(`/transactions/${encodeURIComponent(transactionReference)}`, { baseURL: v2Base }),
+    'Failed to fetch transaction status',
+  );
+

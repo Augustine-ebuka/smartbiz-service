@@ -9,6 +9,7 @@ import {
   fetchBanksListHandler,
   updateSubAccountHandler,
   handleMonnifyWebhook,
+  getTransactionStatusHandler,
 } from '../controllers/walletController';
 import { authenticateToken } from '../middlewares/authMiddleware';
 import { resolveBusinessOwner, requireOwner } from '../middlewares/businessOwnerMiddleware';
@@ -24,6 +25,11 @@ router.get('/bank-accounts/verify', verifyBankAccountHandler);
 
 // Returns a checkoutUrl to redirect the user to for payment
 router.post('/transactions/initialize', initializeTransactionHandler);
+
+// Public — lets the checkout callback page confirm whether Monnify's webhook
+// has actually landed and income was recorded, instead of assuming success
+// from the redirect alone.
+router.get('/transactions/status/:reference', getTransactionStatusHandler);
 
 // POST /sub-accounts
 router.post('/sub-accounts', authenticateToken, resolveBusinessOwner, requireOwner, createSubAccountHandler);
