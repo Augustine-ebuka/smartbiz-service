@@ -16,6 +16,10 @@ class InventoryController {
         totalProducts:   products.length,
         totalQuantity:   products.reduce((sum, p) => sum + p.stock, 0),
         expectedRevenue: products.reduce((sum, p) => sum + p.stock * p.price, 0),
+        // Products missing costPrice contribute 0 here (their own
+        // expectedProfit is null, not 0) — this total is a floor, not exact,
+        // when some products haven't had a cost price set.
+        expectedProfit:  products.reduce((sum, p) => sum + (p.expectedProfit ?? 0), 0),
       };
 
       res.status(200).json({

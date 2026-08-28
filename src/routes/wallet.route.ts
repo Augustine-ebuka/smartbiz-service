@@ -11,6 +11,9 @@ import {
   handleMonnifyWebhook,
   getTransactionStatusHandler,
   getMonnifyTransactionHandler,
+  redeemTransactionHandler,
+  getRedemptionHandler,
+  unredeemTransactionHandler,
 } from '../controllers/walletController';
 import { authenticateToken } from '../middlewares/authMiddleware';
 import { resolveBusinessOwner, requireOwner } from '../middlewares/businessOwnerMiddleware';
@@ -39,6 +42,32 @@ router.get(
   authenticateToken,
   resolveBusinessOwner,
   getMonnifyTransactionHandler,
+);
+
+// Authenticated — mark a paid transaction as redeemed/picked up. Owner or
+// invited saleskeeper of the transaction's business only.
+router.post(
+  '/transactions/:reference/redeem',
+  authenticateToken,
+  resolveBusinessOwner,
+  redeemTransactionHandler,
+);
+
+// Authenticated — cheap check for whether a payment has been redeemed yet.
+router.get(
+  '/transactions/:reference/redemption',
+  authenticateToken,
+  resolveBusinessOwner,
+  getRedemptionHandler,
+);
+
+// Authenticated, owner-only — undo an accidental redemption mark.
+router.delete(
+  '/transactions/:reference/redeem',
+  authenticateToken,
+  resolveBusinessOwner,
+  requireOwner,
+  unredeemTransactionHandler,
 );
 
 // POST /sub-accounts

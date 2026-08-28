@@ -186,6 +186,10 @@ class ProductService {
       // routingOrSwift); those must never go out on an unauthenticated endpoint.
       const profile = businessOwner.settings.companyProfile;
       const businessOwnerPublic = {
+        // Exposed so the storefront can pass it back as `merchantUserId`
+        // when calling /wallet/transactions/initialize — that field drives
+        // the sub-account split, customer scoping, and income attribution.
+        merchantUserId: businessOwner._id.toString(),
         businessName: profile.businessName,
         currency: profile.currency,
         logoUrl: profile.logoUrl,

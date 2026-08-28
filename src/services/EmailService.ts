@@ -37,6 +37,9 @@ interface SendSaleNotificationOptions {
   totalAmount: number;
   paymentReference: string;
   paidAt: Date;
+  isDelivery?: boolean;
+  deliveryFee?: number;
+  address?: string;
 }
 
 interface SendPurchaseReceiptOptions {
@@ -336,9 +339,20 @@ function saleNotificationTemplate(
   products: Array<{ name: string; quantity: number; price: number }>,
   totalAmount: number,
   paymentReference: string,
-  paidAt: Date
+  paidAt: Date,
+  isDelivery?: boolean,
+  deliveryFee?: number,
+  address?: string,
 ): string {
   const fmt = (n: number) => `₦${n.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+
+  const deliveryBlock = isDelivery ? `
+    <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:16px 20px;margin-bottom:24px">
+      <p style="margin:0 0 8px;font-size:13px;font-weight:700;color:#9a3412;text-transform:uppercase;letter-spacing:.5px">🚚 Delivery requested</p>
+      ${address ? `<p style="margin:0 0 4px;font-size:13px;color:#374151"><strong>Address:</strong> ${address}</p>` : ''}
+      ${deliveryFee != null ? `<p style="margin:0;font-size:13px;color:#374151"><strong>Delivery fee:</strong> ${fmt(deliveryFee)}</p>` : ''}
+    </div>
+  ` : '';
   const dateStr = new Date(paidAt).toLocaleString('en-NG', {
     dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Lagos',
   });
@@ -379,6 +393,8 @@ function saleNotificationTemplate(
             <p style="margin:0 0 4px;color:#166534;font-size:13px;text-transform:uppercase;letter-spacing:.5px;font-weight:700">Amount Received</p>
             <p style="margin:0;color:#15803d;font-size:36px;font-weight:800">${fmt(totalAmount)}</p>
           </div>
+
+          ${deliveryBlock}
 
           <!-- Products table -->
           <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
@@ -799,12 +815,13 @@ class EmailService {
   async sendSaleNotification({
     to, ownerName, businessName, customerName,
     products, totalAmount, paymentReference, paidAt,
+    isDelivery, deliveryFee, address,
   }: SendSaleNotificationOptions): Promise<void> {
     await resend.emails.send({
       from:    FROM_ADDRESS,
       to,
       subject: `💰 New sale — ${customerName} paid ₦${totalAmount.toLocaleString('en-NG')}`,
-      html:    saleNotificationTemplate(ownerName, businessName, customerName, products, totalAmount, paymentReference, paidAt),
+      html:    saleNotificationTemplate(ownerName, businessName, customerName, products, totalAmount, paymentReference, paidAt, isDelivery, deliveryFee, address),
     });
   }
 

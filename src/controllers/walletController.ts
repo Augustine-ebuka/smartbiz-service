@@ -13,6 +13,8 @@ import {Product} from '../models/product.model';
 import emailService from '../services/EmailService';
 import subscriptionService from '../services/subscriptionService';
 import { generateUniqueStoreSlug } from '../utils/slugify';
+import ApiError from '../utils/ApiError';
+import notificationService from '../services/notificationService';
 
 // Sub-accounts always receive this share of split payments; the main
 // account keeps the rest. Fixed server-side — client input is ignored.
@@ -109,7 +111,9 @@ export const initializeTransactionHandler = async (
       paymentDescription,
       address,
       products,
-      merchantUserId
+      merchantUserId,
+      isDelivery,
+      deliveryFee,
     }: {
       amount?: number;
       customerName?: string;
@@ -120,6 +124,8 @@ export const initializeTransactionHandler = async (
       address?: string;
       products?: any[];
       merchantUserId?: string;
+      isDelivery?: boolean;
+      deliveryFee?: number;
     } = req.body ?? {};
 
     if (!amount || !customerName || !customerEmail || !redirectUrl) {
@@ -183,6 +189,8 @@ export const initializeTransactionHandler = async (
       user_id:            merchantUserId,
       customer_id:        customer._id,
       address,
+      isDelivery:         Boolean(isDelivery),
+      deliveryFee:        isDelivery ? deliveryFee : undefined,
       products:           products ?? [],
     });
 
@@ -262,6 +270,14 @@ export const getTransactionStatusHandler = async (
       }
     }
 
+    // A multi-product sale creates one Income record per product line, each
+    // with its own receiptId — there's no single receipt number that covers
+    // the whole order. We surface the first one created as *the* receiptId,
+    // which is exact for the (overwhelmingly common) single-product case.
+    const income = await Income.findOne({ transactionId: transaction._id })
+      .sort({ createdAt: 1 })
+      .select('receiptId');
+
     res.status(200).json({
       success: true,
       data: {
@@ -269,6 +285,7 @@ export const getTransactionStatusHandler = async (
         amount:                transaction.amount,
         paymentReference:      transaction.payment_reference,
         transactionReference:  transaction.trans_ref,
+        receiptId:             income?.receiptId ?? null,
       },
     });
   } catch (error) {
@@ -305,7 +322,7 @@ export const getMonnifyTransactionHandler = async (
       return;
     }
 
-    const transaction = await Transaction.findOne({ trans_ref: transactionReference }).select('user_id');
+    const transaction = await Transaction.findOne({ trans_ref: transactionReference }).select('user_id redemption');
     if (!transaction || transaction.user_id.toString() !== ownerId) {
       res.status(404).json({
         success: false,
@@ -318,7 +335,199 @@ export const getMonnifyTransactionHandler = async (
 
     res.status(200).json({
       success: true,
-      data: monnifyData,
+      data: {
+        ...monnifyData,
+        redemption: serializeRedemption(transaction),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** Shapes a Transaction's `redemption` sub-doc for API responses, or null if unredeemed. */
+const serializeRedemption = (transaction: { redemption?: any }) => {
+  if (!transaction.redemption) return null;
+  return {
+    redeemedAt: transaction.redemption.redeemedAt,
+    redeemedBy: transaction.redemption.redeemedBy,
+    redeemedByName: transaction.redemption.redeemedByName,
+    note: transaction.redemption.note ?? null,
+  };
+};
+
+/**
+ * POST /transactions/:reference/redeem
+ *
+ * Marks a paid transaction as physically redeemed/picked up. `:reference`
+ * matches either transactionReference (trans_ref) or paymentReference
+ * (payment_reference), since either could be scanned/typed. `redeemedBy`
+ * comes from the auth token, never the request body, so this is a real
+ * audit trail rather than a client-supplied claim.
+ *
+ * Idempotency is enforced by an atomic update guarded on
+ * `{ redemption: { $exists: false } }` — a second call can't silently
+ * overwrite who/when a payment was redeemed, it gets a 409 instead.
+ */
+export const redeemTransactionHandler = async (
+  req: any,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const { reference } = req.params;
+    const { note } = req.body ?? {};
+    const ownerId = req.businessOwnerId as string;
+    const redeemedById = req.userId as string;
+
+    const transaction = await Transaction.findOne({
+      $or: [{ trans_ref: reference }, { payment_reference: reference }],
+    });
+
+    if (!transaction) {
+      next(new ApiError(404, 'Transaction not found.'));
+      return;
+    }
+
+    if (transaction.user_id.toString() !== ownerId) {
+      next(new ApiError(403, 'You do not have permission to redeem this payment.'));
+      return;
+    }
+
+    if (transaction.redemption) {
+      res.status(409).json({
+        success: false,
+        message: 'This payment has already been redeemed.',
+        code: 409,
+        data: serializeRedemption(transaction),
+      });
+      return;
+    }
+
+    const redeemer = await User.findById(redeemedById).select('firstName lastName');
+    const redeemedByName = redeemer ? `${redeemer.firstName} ${redeemer.lastName}`.trim() : 'Unknown';
+    const redeemedAt = new Date();
+
+    // Atomic — only succeeds if no redemption exists yet, closing the race
+    // window between the check above and this write.
+    const updated = await Transaction.findOneAndUpdate(
+      { _id: transaction._id, redemption: { $exists: false } },
+      {
+        $set: {
+          redemption: {
+            redeemedBy: redeemedById,
+            redeemedByName,
+            redeemedAt,
+            note: note ?? null,
+          },
+        },
+      },
+      { new: true },
+    );
+
+    if (!updated) {
+      // Lost the race — another request redeemed it between our check and write.
+      const latest = await Transaction.findById(transaction._id);
+      res.status(409).json({
+        success: false,
+        message: 'This payment has already been redeemed.',
+        code: 409,
+        data: serializeRedemption(latest ?? {}),
+      });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Payment marked as redeemed.',
+      data: {
+        reference,
+        transactionReference: updated.trans_ref,
+        paymentReference: updated.payment_reference,
+        ...serializeRedemption(updated),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /transactions/:reference/redemption
+ * Cheap existence check for whether a payment has been redeemed yet.
+ */
+export const getRedemptionHandler = async (
+  req: any,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const { reference } = req.params;
+    const ownerId = req.businessOwnerId as string;
+
+    const transaction = await Transaction.findOne({
+      $or: [{ trans_ref: reference }, { payment_reference: reference }],
+    }).select('user_id redemption');
+
+    if (!transaction) {
+      next(new ApiError(404, 'Transaction not found.'));
+      return;
+    }
+
+    if (transaction.user_id.toString() !== ownerId) {
+      next(new ApiError(403, 'You do not have permission to view this payment.'));
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: serializeRedemption(transaction),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * DELETE /transactions/:reference/redeem
+ * Lets the business owner undo an accidental redemption mark. Owner-only
+ * (enforced via requireOwner on the route) — staff can redeem but not undo.
+ */
+export const unredeemTransactionHandler = async (
+  req: any,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const { reference } = req.params;
+    const ownerId = req.businessOwnerId as string;
+
+    const transaction = await Transaction.findOne({
+      $or: [{ trans_ref: reference }, { payment_reference: reference }],
+    });
+
+    if (!transaction) {
+      next(new ApiError(404, 'Transaction not found.'));
+      return;
+    }
+
+    if (transaction.user_id.toString() !== ownerId) {
+      next(new ApiError(403, 'You do not have permission to modify this payment.'));
+      return;
+    }
+
+    if (!transaction.redemption) {
+      next(new ApiError(400, 'This payment has not been redeemed.'));
+      return;
+    }
+
+    transaction.redemption = undefined;
+    await transaction.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Redemption removed.',
+      data: null,
     });
   } catch (error) {
     next(error);
@@ -625,11 +834,26 @@ const finalizeSuccessfulPayment = async ({
       transactionReference
     );
     console.log(`[Subscription] Activated ${transaction.metadata.planId} for user ${transaction.user_id}`);
+
+    await notificationService.createIfNotDuplicate({
+      userId: transaction.user_id.toString(),
+      type: 'new_sale',
+      severity: 'info',
+      title: '✅ Subscription payment received',
+      message: `Your payment of ₦${amountPaid.toLocaleString('en-NG')} was received and your ${transaction.metadata.planId} plan is now active.`,
+      resourceType: 'transaction',
+      resourceId: transaction._id.toString(),
+    }).catch(err => console.error('[Notification] Subscription notification failed:', err));
+
     return transaction;
   }
 
-  // Create an income record for each product and deduct stock
+  // Create an income record for each product and deduct stock. All rows
+  // from this one sale share a single receiptId — set explicitly from the
+  // second row on — so a multi-product order reads back as one receipt
+  // instead of one per line item.
   const products = transaction.products || [];
+  let sharedReceiptId: string | undefined;
   for (const product of products) {
     const income = await Income.create({
       userId: transaction.user_id,
@@ -638,7 +862,10 @@ const finalizeSuccessfulPayment = async ({
       unit: product.quantity,
       amount: product.quantity * product.price,
       customerId: transaction.customer_id,
+      transactionId: transaction._id,
+      receiptId: sharedReceiptId,
     });
+    sharedReceiptId = income.receiptId;
     const { isLowStock, stockAfter } = await inventoryService.deductForSale(
       transaction.user_id.toString(),
       product.product_id.toString(),
@@ -672,6 +899,22 @@ const finalizeSuccessfulPayment = async ({
   }));
 
   const paidAt = new Date();
+  const buyerName = customer?.name ?? customerName ?? 'A customer';
+
+  // In-app notification — created regardless of whether the emails below
+  // succeed, so a sale (and whether it needs delivery) is always visible in
+  // the dashboard even if Resend silently fails or the mail lands in spam.
+  await notificationService.createIfNotDuplicate({
+    userId: transaction.user_id.toString(),
+    type: 'new_sale',
+    severity: 'info',
+    title: transaction.isDelivery ? '🚚 New sale — delivery needed' : '💰 New sale',
+    message: transaction.isDelivery
+      ? `${buyerName} paid ₦${amountPaid.toLocaleString('en-NG')} and requested delivery to: ${transaction.address ?? 'address not provided'}.`
+      : `${buyerName} paid ₦${amountPaid.toLocaleString('en-NG')}.`,
+    resourceType: 'transaction',
+    resourceId: transaction._id.toString(),
+  }).catch(err => console.error('[Notification] Sale notification failed:', err));
 
   // 1 — Notify the business owner
   if (owner?.email) {
@@ -684,6 +927,9 @@ const finalizeSuccessfulPayment = async ({
       totalAmount:      amountPaid,
       paymentReference,
       paidAt,
+      isDelivery:       transaction.isDelivery,
+      deliveryFee:      transaction.deliveryFee,
+      address:          transaction.address,
     }).catch(err => console.error('[Email] Sale notification failed:', err));
   }
 

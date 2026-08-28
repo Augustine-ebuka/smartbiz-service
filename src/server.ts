@@ -89,6 +89,28 @@ async function dropLegacyGlobalReceiptIdIndex() {
   console.log(`Dropped legacy global-unique index on incomes.${legacyIndex.name}`);
 }
 
+// receiptId used to be unique per (userId, receiptId) — one row per receipt.
+// Multi-product sales now deliberately reuse the same receiptId across every
+// product-line row from one sale, so that constraint would reject the 2nd+
+// row. The schema now declares that index without `unique` — this drops the
+// stale unique one left over in MongoDB from before.
+async function dropLegacyReceiptIdUniqueIndex() {
+  const incomesCollection = mongoose.connection.collection('incomes');
+  const indexes = await incomesCollection.indexes();
+
+  const legacyIndex = indexes.find((index) => {
+    const keys = Object.keys(index.key ?? {});
+    return keys.length === 2 && index.key?.userId === 1 && index.key?.receiptId === 1 && index.unique;
+  });
+
+  if (!legacyIndex?.name) {
+    return;
+  }
+
+  await incomesCollection.dropIndex(legacyIndex.name);
+  console.log(`Dropped legacy unique index on incomes.${legacyIndex.name}`);
+}
+
 app.use(express.json());
 
 const webhookBasePaths = [APP_PREFIX_PATH, '/'];
@@ -178,6 +200,7 @@ async function startServer() {
     await dropLegacyUserOtpTtlIndexes();
     await dropLegacyGlobalInvoiceNumberIndex();
     await dropLegacyGlobalReceiptIdIndex();
+    await dropLegacyReceiptIdUniqueIndex();
 
     console.log('Connected to MongoDB successfully');
 

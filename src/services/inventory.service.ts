@@ -280,6 +280,7 @@ class InventoryService {
       name:              p.name,
       type:              p.type,
       price:             p.price,
+      costPrice:         p.costPrice ?? null,
       stock:             p.stock,
       lowStockThreshold: p.lowStockThreshold,
       isLowStock:        p.stock <= p.lowStockThreshold,
@@ -288,6 +289,9 @@ class InventoryService {
         : p.stock <= p.lowStockThreshold
           ? 'low_stock'
           : 'in_stock',
+      // Profit if all current stock sells at `price`. null (not 0) when
+      // costPrice isn't set — there's no honest profit figure without it.
+      expectedProfit: p.costPrice != null ? (p.price - p.costPrice) * p.stock : null,
     }));
   }
 

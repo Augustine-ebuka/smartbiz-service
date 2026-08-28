@@ -11,7 +11,7 @@ export interface CreateNotificationDTO {
   severity: NotificationSeverity;
   title: string;
   message: string;
-  resourceType: 'product' | 'debt' | 'invoice';
+  resourceType: 'product' | 'debt' | 'invoice' | 'transaction';
   resourceId: string;
 }
 

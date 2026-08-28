@@ -2,7 +2,7 @@ import mongoose, { Document, Schema } from 'mongoose';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type NotificationType = 'low_stock' | 'debt_due' | 'invoice_due';
+export type NotificationType = 'low_stock' | 'debt_due' | 'invoice_due' | 'new_sale';
 export type NotificationSeverity = 'info' | 'warning' | 'critical';
 
 // ─── Interface ────────────────────────────────────────────────────────────────
@@ -14,7 +14,7 @@ export interface INotification extends Document {
   severity: NotificationSeverity;
   title: string;
   message: string;
-  resourceType: 'product' | 'debt' | 'invoice';
+  resourceType: 'product' | 'debt' | 'invoice' | 'transaction';
   resourceId: string;
   read: boolean;
   readAt?: Date;
@@ -26,11 +26,11 @@ export interface INotification extends Document {
 const NotificationSchema = new Schema<INotification>(
   {
     userId:       { type: String, required: true, index: true },
-    type:         { type: String, required: true, enum: ['low_stock', 'debt_due', 'invoice_due'] },
+    type:         { type: String, required: true, enum: ['low_stock', 'debt_due', 'invoice_due', 'new_sale'] },
     severity:     { type: String, required: true, enum: ['info', 'warning', 'critical'], default: 'info' },
     title:        { type: String, required: true, trim: true },
     message:      { type: String, required: true, trim: true },
-    resourceType: { type: String, required: true, enum: ['product', 'debt', 'invoice'] },
+    resourceType: { type: String, required: true, enum: ['product', 'debt', 'invoice', 'transaction'] },
     resourceId:   { type: String, required: true },
     read:         { type: Boolean, default: false },
     readAt:       { type: Date },
