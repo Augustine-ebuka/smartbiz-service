@@ -322,7 +322,8 @@ export const getMonnifyTransactionHandler = async (
       return;
     }
 
-    const transaction = await Transaction.findOne({ trans_ref: transactionReference }).select('user_id redemption');
+    const transaction = await Transaction.findOne({ trans_ref: transactionReference })
+      .select('user_id redemption products');
     if (!transaction || transaction.user_id.toString() !== ownerId) {
       res.status(404).json({
         success: false,
@@ -331,18 +332,40 @@ export const getMonnifyTransactionHandler = async (
       return;
     }
 
-    const monnifyData = await getCheckoutTransactionStatus(transactionReference);
+    const [monnifyData, products] = await Promise.all([
+      getCheckoutTransactionStatus(transactionReference),
+      resolveTransactionProducts(transaction.products),
+    ]);
 
     res.status(200).json({
       success: true,
       data: {
         ...monnifyData,
+        products,
         redemption: serializeRedemption(transaction),
       },
     });
   } catch (error) {
     next(error);
   }
+};
+
+/**
+ * Enriches a transaction's raw product lines (only ever { product_id,
+ * quantity, price } from the checkout payload) with real names from the
+ * catalog, same lookup used to build the sale-notification/receipt emails.
+ */
+const resolveTransactionProducts = async (products: any[]) => {
+  const productIds = (products || []).map((p: any) => p.product_id).filter(Boolean);
+  const productDocs = await Product.find({ _id: { $in: productIds } }).select('name');
+  const productNameById = new Map(productDocs.map((doc: any) => [doc._id.toString(), doc.name]));
+
+  return (products || []).map((p: any) => ({
+    productId: p.product_id,
+    name:      p.name ?? productNameById.get(p.product_id?.toString()) ?? 'Product',
+    quantity:  p.quantity ?? 1,
+    price:     p.price    ?? 0,
+  }));
 };
 
 /** Shapes a Transaction's `redemption` sub-doc for API responses, or null if unredeemed. */
@@ -885,18 +908,9 @@ const finalizeSuccessfulPayment = async ({
   const businessEmail = owner?.settings?.companyProfile?.contact?.email;
   const businessPhone = owner?.settings?.companyProfile?.contact?.phone;
 
-  // Build product list for email. The checkout payload only ever sends
-  // { product_id, quantity, price } — never a name — so look names up from
-  // the catalog rather than falling back to the literal string 'Product'.
-  const productIds = transaction.products.map((p: any) => p.product_id).filter(Boolean);
-  const productDocs = await Product.find({ _id: { $in: productIds } }).select('name');
-  const productNameById = new Map(productDocs.map((doc: any) => [doc._id.toString(), doc.name]));
-
-  const emailProducts = transaction.products.map((p: any) => ({
-    name:     p.name ?? productNameById.get(p.product_id?.toString()) ?? 'Product',
-    quantity: p.quantity ?? 1,
-    price:    p.price    ?? 0,
-  }));
+  // Build product list for email — looks up real names from the catalog
+  // rather than falling back to the literal string 'Product'.
+  const emailProducts = await resolveTransactionProducts(transaction.products);
 
   const paidAt = new Date();
   const buyerName = customer?.name ?? customerName ?? 'A customer';
