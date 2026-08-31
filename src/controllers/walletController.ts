@@ -12,6 +12,7 @@ import inventoryService from '../services/inventory.service';
 import {Product} from '../models/product.model';
 import emailService from '../services/EmailService';
 import subscriptionService from '../services/subscriptionService';
+import { getPlan, PlanLimits } from '../config/subscription.config';
 import { generateUniqueStoreSlug } from '../utils/slugify';
 import ApiError from '../utils/ApiError';
 import notificationService from '../services/notificationService';
@@ -45,7 +46,7 @@ export const createReservedAccountHandler = async (
   } catch (error) {
     // Delegate to error middleware rather than hardcoding 400 here —
     // lets you distinguish validation errors (400) from upstream/Monnify
-    // failures (502/503) in one place instead of per-controller.
+    // failures (502/503) in one place instead -of per-controller.
     next(error);
   }
 };
@@ -103,7 +104,6 @@ export const initializeTransactionHandler = async (
     // const merchantUserId = req.userId as string;  // ← from JWT, never from body
 
     const {
-      amount,
       customerName,
       customerEmail,
       customerPhone,
@@ -113,28 +113,73 @@ export const initializeTransactionHandler = async (
       products,
       merchantUserId,
       isDelivery,
-      deliveryFee,
     }: {
-      amount?: number;
+      amount?: number;   // accepted but never trusted — see recomputation below
       customerName?: string;
       customerEmail?: string;
       customerPhone?: string;
       redirectUrl?: string;
       paymentDescription?: string;
       address?: string;
-      products?: any[];
+      products?: Array<{ product_id?: string; quantity?: number }>;
       merchantUserId?: string;
       isDelivery?: boolean;
-      deliveryFee?: number;
+      deliveryFee?: number;   // accepted but never trusted — see recomputation below
     } = req.body ?? {};
 
-    if (!amount || !customerName || !customerEmail || !redirectUrl) {
+    if (!customerName || !customerEmail || !redirectUrl || !merchantUserId || !products?.length) {
       res.status(400).json({
         success: false,
-        error: 'amount, customerName, customerEmail and redirectUrl are required',
+        error: 'customerName, customerEmail, redirectUrl, merchantUserId and a non-empty products array are required',
       });
       return;
     }
+
+    const merchant = await User.findById(merchantUserId)
+      .select('settings.companyProfile.subAccountCode settings.companyProfile.deliveryFee settings.companyProfile.freeDeliveryThreshold');
+    if (!merchant) {
+      res.status(404).json({ success: false, error: 'Store not found.' });
+      return;
+    }
+
+    // Recompute price, quantity and the delivery fee from the database —
+    // never trust client-supplied amount/price/deliveryFee, which would let
+    // a tampered request pay less than a product actually costs and still
+    // get full income/stock fulfillment.
+    const productIds = products.map(p => p.product_id).filter(Boolean);
+    const catalogProducts = await Product.find({ _id: { $in: productIds }, userId: merchantUserId });
+    const catalogProductById = new Map(catalogProducts.map(p => [p._id.toString(), p]));
+
+    const verifiedProducts: Array<{ product_id: string; name: string; quantity: number; price: number }> = [];
+    for (const requested of products) {
+      const catalogProduct = requested.product_id ? catalogProductById.get(requested.product_id.toString()) : undefined;
+      const quantity = Number(requested.quantity);
+
+      if (!catalogProduct || !Number.isInteger(quantity) || quantity < 1) {
+        res.status(400).json({
+          success: false,
+          error: `Invalid product in cart: ${requested.product_id ?? '(missing product_id)'}`,
+        });
+        return;
+      }
+
+      verifiedProducts.push({
+        product_id: catalogProduct._id.toString(),
+        name:       catalogProduct.name,
+        quantity,
+        price:      catalogProduct.price,   // real price from the catalog, not client input
+      });
+    }
+
+    const subtotal = verifiedProducts.reduce((sum, p) => sum + p.quantity * p.price, 0);
+
+    const merchantDeliveryFee = merchant.settings?.companyProfile?.deliveryFee ?? 0;
+    const freeDeliveryThreshold = merchant.settings?.companyProfile?.freeDeliveryThreshold;
+    const verifiedDeliveryFee = isDelivery
+      ? (freeDeliveryThreshold != null && subtotal >= freeDeliveryThreshold ? 0 : merchantDeliveryFee)
+      : 0;
+
+    const amount = subtotal + verifiedDeliveryFee;
 
     // Always generate server-side — never trust client-supplied references
     const paymentReference = `PF-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
@@ -142,12 +187,9 @@ export const initializeTransactionHandler = async (
     // Build the split from the merchant's own subAccountCode on file — never
     // from client input — so the service fee can't be tampered with.
     let incomeSplitConfig: SplitConfigEntry[] | undefined;
-    if (merchantUserId) {
-      const merchant = await User.findById(merchantUserId).select('settings.companyProfile.subAccountCode');
-      const subAccountCode = merchant?.settings?.companyProfile?.subAccountCode;
-      if (subAccountCode) {
-        incomeSplitConfig = [{ subAccountCode, feePercentage: SUB_ACCOUNT_SPLIT_PERCENTAGE }];
-      }
+    const subAccountCode = merchant.settings?.companyProfile?.subAccountCode;
+    if (subAccountCode) {
+      incomeSplitConfig = [{ subAccountCode, feePercentage: SUB_ACCOUNT_SPLIT_PERCENTAGE }];
     }
 
     const transaction = await initializeTransaction({
@@ -190,8 +232,8 @@ export const initializeTransactionHandler = async (
       customer_id:        customer._id,
       address,
       isDelivery:         Boolean(isDelivery),
-      deliveryFee:        isDelivery ? deliveryFee : undefined,
-      products:           products ?? [],
+      deliveryFee:        isDelivery ? verifiedDeliveryFee : undefined,
+      products:           verifiedProducts,
     });
 
     res.status(200).json({
@@ -250,19 +292,21 @@ export const getTransactionStatusHandler = async (
     // The webhook may not have landed yet — unreachable on local dev,
     // delayed, or dropped in production — so ask Monnify directly for the
     // live status rather than leaving the frontend polling a stale
-    // 'pending' forever.
-    if (transaction.status === 'pending') {
+    // 'pending' forever. Also re-check a 'partially_paid' transaction in
+    // case the customer has since sent the remaining balance.
+    if (transaction.status === 'pending' || transaction.status === 'partially_paid') {
       try {
         const liveStatus = await getCheckoutTransactionStatus(transaction.trans_ref);
-        if (liveStatus.paymentStatus === 'PAID') {
-          const finalized = await finalizeSuccessfulPayment({
+        if (liveStatus.paymentStatus === 'PAID' || liveStatus.paymentStatus === 'OVERPAID' || liveStatus.paymentStatus === 'PARTIALLY_PAID') {
+          const processed = await processPaymentEvent({
             transactionReference: transaction.trans_ref,
             paymentReference: liveStatus.paymentReference ?? transaction.payment_reference,
             amountPaid: liveStatus.amountPaid,
+            paymentStatus: liveStatus.paymentStatus,
             customerName: liveStatus.customer?.name,
             customerEmail: liveStatus.customer?.email,
           });
-          if (finalized) transaction = finalized;
+          if (processed) transaction = processed;
         }
       } catch (err) {
         console.error('[Transaction Status] Monnify requery failed:', (err as Error).message);
@@ -283,6 +327,8 @@ export const getTransactionStatusHandler = async (
       data: {
         status:                transaction.status,
         amount:                transaction.amount,
+        amountPaid:            transaction.amountPaid ?? null,
+        paymentVariance:       transaction.paymentVariance ?? null,
         paymentReference:      transaction.payment_reference,
         transactionReference:  transaction.trans_ref,
         receiptId:             income?.receiptId ?? null,
@@ -323,7 +369,7 @@ export const getMonnifyTransactionHandler = async (
     }
 
     const transaction = await Transaction.findOne({ trans_ref: transactionReference })
-      .select('user_id redemption products');
+      .select('user_id redemption products amount amountPaid paymentVariance');
     if (!transaction || transaction.user_id.toString() !== ownerId) {
       res.status(404).json({
         success: false,
@@ -342,6 +388,9 @@ export const getMonnifyTransactionHandler = async (
       data: {
         ...monnifyData,
         products,
+        expectedAmount:  transaction.amount,
+        amountPaid:      transaction.amountPaid ?? null,
+        paymentVariance: transaction.paymentVariance ?? null,
         redemption: serializeRedemption(transaction),
       },
     });
@@ -813,57 +862,143 @@ export const updateSubAccountHandler = async (
   }
 };
 
-interface FinalizePaymentParams {
+/**
+ * Turns a plan's raw limit numbers into the human-readable bullet list the
+ * subscription confirmation email shows under "What's included". `-1` means
+ * unlimited; boolean flags are only listed when enabled.
+ */
+const describePlanFeatures = (l: PlanLimits): string[] => {
+  const cap = (n: number, noun: string, suffix = '') =>
+    n === -1 ? `Unlimited ${noun}${suffix}` : `${n.toLocaleString('en-NG')} ${noun}${suffix}`;
+
+  const features = [
+    cap(l.aiQueriesPerDay, 'AI queries', ' per day'),
+    cap(l.incomePerMonth, 'income records', ' per month'),
+    cap(l.expensePerMonth, 'expense records', ' per month'),
+    cap(l.customers, 'customers'),
+    cap(l.products, 'products'),
+    cap(l.invoices, 'invoices'),
+    cap(l.vendors, 'vendors'),
+    l.saleskeeperInvites === -1
+      ? 'Unlimited saleskeeper seats'
+      : `${l.saleskeeperInvites} saleskeeper seat${l.saleskeeperInvites === 1 ? '' : 's'}`,
+  ];
+
+  if (l.bulkImport) features.push('Bulk import from spreadsheets');
+  if (l.fullReports) features.push('Full business reports (P&L, cash flow, expense breakdown)');
+
+  return features;
+};
+
+interface ProcessPaymentEventParams {
   transactionReference: string;
   paymentReference: string;
   amountPaid: number;
+  /** Monnify's reported status for this event — PAID/OVERPAID fulfil the order, PARTIALLY_PAID only records the underpayment. */
+  paymentStatus: 'PAID' | 'OVERPAID' | 'PARTIALLY_PAID';
   customerName?: string;
   customerEmail?: string;
 }
 
 /**
- * Marks a transaction successful and runs the post-payment side effects —
- * income + stock deduction for catalog sales, plan activation for
- * subscriptions, owner/customer emails. Shared by the webhook handler and
- * the status-poll fallback (getTransactionStatusHandler) so both paths run
- * identical logic instead of two copies that can drift apart.
+ * Records a payment event against a transaction and, for PAID/OVERPAID,
+ * runs the fulfillment side effects — income + stock deduction for catalog
+ * sales, plan activation for subscriptions, owner/customer emails. Shared
+ * by the webhook handler and the status-poll fallback
+ * (getTransactionStatusHandler) so both paths run identical logic instead
+ * of two copies that can drift apart.
+ *
+ * PARTIALLY_PAID deliberately does NOT fulfil the order — a bank transfer
+ * can be for less than requested, and creating income/deducting stock for
+ * an underpaid order would hand out goods the customer hasn't fully paid
+ * for. It's recorded (status: 'partially_paid') and the owner is notified,
+ * so the underpayment is visible instead of the transaction sitting
+ * silently 'pending' forever.
  *
  * Idempotent: returns the transaction as-is if it's already 'successful',
  * since Monnify retries webhook delivery and the poll fallback may also
- * race the webhook.
+ * race the webhook. A transaction sitting at 'partially_paid' can still be
+ * reprocessed — e.g. the customer sends the remaining balance later.
  */
-const finalizeSuccessfulPayment = async ({
+const processPaymentEvent = async ({
   transactionReference,
   paymentReference,
   amountPaid,
+  paymentStatus,
   customerName,
   customerEmail,
-}: FinalizePaymentParams) => {
+}: ProcessPaymentEventParams) => {
   const transaction = await Transaction.findOne({ trans_ref: transactionReference });
   if (!transaction) return null;
 
   if (transaction.status === 'successful') return transaction;
 
-  transaction.status = 'successful';
+  const expectedAmount = transaction.amount;
+  const paymentVariance: 'exact' | 'overpaid' | 'underpaid' =
+    amountPaid > expectedAmount ? 'overpaid' : amountPaid < expectedAmount ? 'underpaid' : 'exact';
+
+  transaction.amountPaid = amountPaid;
+  transaction.paymentVariance = paymentVariance;
   transaction.payment_reference = paymentReference;
+
+  if (paymentStatus === 'PARTIALLY_PAID') {
+    transaction.status = 'partially_paid';
+    await transaction.save();
+
+    await notificationService.createIfNotDuplicate({
+      userId: transaction.user_id.toString(),
+      type: 'new_sale',
+      severity: 'warning',
+      title: '⚠️ Underpayment received',
+      message: `A customer paid ₦${amountPaid.toLocaleString('en-NG')} of the ₦${expectedAmount.toLocaleString('en-NG')} expected (reference ${paymentReference}). The order has not been fulfilled — review and follow up.`,
+      resourceType: 'transaction',
+      resourceId: transaction._id.toString(),
+    }).catch(err => console.error('[Notification] Underpayment notification failed:', err));
+
+    return transaction;
+  }
+
+  transaction.status = 'successful';
   await transaction.save();
 
   // Subscription upgrades aren't catalog sales — activate the plan and
   // skip the income/stock/email flow below, which assumes real products.
   if (transaction.purpose === 'subscription' && transaction.metadata?.planId) {
-    await subscriptionService.activatePlan(
+    const planId = transaction.metadata.planId;
+    const { endDate, isRenewal } = await subscriptionService.activatePlan(
       transaction.user_id.toString(),
-      transaction.metadata.planId,
+      planId,
       transactionReference
     );
-    console.log(`[Subscription] Activated ${transaction.metadata.planId} for user ${transaction.user_id}`);
+    console.log(`[Subscription] Activated ${planId} for user ${transaction.user_id}`);
+
+    const plan  = getPlan(planId);
+    const owner = await User.findById(transaction.user_id).select('firstName email');
+
+    // Follow-up email: what they bought, when it runs out, and that it
+    // won't auto-renew. Best-effort — a mail failure must not block the
+    // activation that already succeeded above.
+    if (owner?.email) {
+      emailService.sendSubscriptionConfirmation({
+        to:               owner.email,
+        firstName:        owner.firstName,
+        planName:         plan.name,
+        amountPaid,
+        durationDays:     plan.durationDays,
+        startDate:        new Date(),
+        endDate,
+        paymentReference,
+        isRenewal,
+        features:         describePlanFeatures(plan.limits),
+      }).catch(err => console.error('[Email] Subscription confirmation failed:', err));
+    }
 
     await notificationService.createIfNotDuplicate({
       userId: transaction.user_id.toString(),
       type: 'new_sale',
       severity: 'info',
-      title: '✅ Subscription payment received',
-      message: `Your payment of ₦${amountPaid.toLocaleString('en-NG')} was received and your ${transaction.metadata.planId} plan is now active.`,
+      title: isRenewal ? '✅ Subscription renewed' : '✅ Subscription payment received',
+      message: `Your payment of ₦${amountPaid.toLocaleString('en-NG')} was received. Your ${plan.name} plan is active until ${endDate.toLocaleDateString('en-NG', { dateStyle: 'long' })}.`,
       resourceType: 'transaction',
       resourceId: transaction._id.toString(),
     }).catch(err => console.error('[Notification] Subscription notification failed:', err));
@@ -914,6 +1049,9 @@ const finalizeSuccessfulPayment = async ({
 
   const paidAt = new Date();
   const buyerName = customer?.name ?? customerName ?? 'A customer';
+  const varianceNote = transaction.paymentVariance === 'overpaid'
+    ? ` (overpaid by ₦${(amountPaid - expectedAmount).toLocaleString('en-NG')})`
+    : '';
 
   // In-app notification — created regardless of whether the emails below
   // succeed, so a sale (and whether it needs delivery) is always visible in
@@ -924,8 +1062,8 @@ const finalizeSuccessfulPayment = async ({
     severity: 'info',
     title: transaction.isDelivery ? '🚚 New sale — delivery needed' : '💰 New sale',
     message: transaction.isDelivery
-      ? `${buyerName} paid ₦${amountPaid.toLocaleString('en-NG')} and requested delivery to: ${transaction.address ?? 'address not provided'}.`
-      : `${buyerName} paid ₦${amountPaid.toLocaleString('en-NG')}.`,
+      ? `${buyerName} paid ₦${amountPaid.toLocaleString('en-NG')}${varianceNote} and requested delivery to: ${transaction.address ?? 'address not provided'}.`
+      : `${buyerName} paid ₦${amountPaid.toLocaleString('en-NG')}${varianceNote}.`,
     resourceType: 'transaction',
     resourceId: transaction._id.toString(),
   }).catch(err => console.error('[Notification] Sale notification failed:', err));
@@ -987,15 +1125,19 @@ export const handleMonnifyWebhook = async (req: Request, res: Response): Promise
 
     const { eventType, eventData } = req.body;
 
-    // 2. Check for successful transaction event
+    // 2. Check for successful transaction event — Monnify still names this
+    // event 'SUCCESSFUL_TRANSACTION' even when paymentStatus comes back
+    // OVERPAID or PARTIALLY_PAID (real for bank transfer), so branch on
+    // paymentStatus rather than assuming it's always an exact match.
     if (eventType === 'SUCCESSFUL_TRANSACTION') {
       const { paymentReference, amountPaid, paymentStatus, transactionReference, customerName, customerEmail } = eventData;
 
-      if (paymentStatus === 'PAID') {
-        const transaction = await finalizeSuccessfulPayment({
+      if (paymentStatus === 'PAID' || paymentStatus === 'OVERPAID' || paymentStatus === 'PARTIALLY_PAID') {
+        const transaction = await processPaymentEvent({
           transactionReference,
           paymentReference,
           amountPaid,
+          paymentStatus,
           customerName,
           customerEmail,
         });

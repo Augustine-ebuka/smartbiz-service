@@ -91,6 +91,19 @@ interface SendWalletFundedOptions {
   fundedAt: Date;
 }
 
+interface SendSubscriptionConfirmationOptions {
+  to: string;
+  firstName: string;
+  planName: string;             // e.g. "Pro Monthly"
+  amountPaid: number;           // in naira, not kobo
+  durationDays: number;         // billing period length
+  startDate: Date;
+  endDate: Date;                // access is guaranteed through this date
+  paymentReference: string;
+  isRenewal: boolean;           // true = extended an already-active paid plan
+  features: string[];           // human-readable list of what the plan unlocks
+}
+
 // ─── Resend client ────────────────────────────────────────────────────────────
 
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -772,6 +785,131 @@ function walletFundedTemplate(
   `;
 }
 
+// ─── Subscription Confirmation Template ───────────────────────────────────────
+
+function subscriptionConfirmationTemplate(
+  firstName: string,
+  planName: string,
+  amountPaid: number,
+  durationDays: number,
+  startDate: Date,
+  endDate: Date,
+  paymentReference: string,
+  isRenewal: boolean,
+  features: string[],
+): string {
+  const appUrl = process.env.APP_URL ?? '#';
+  const fmt = (n: number) => `₦${n.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+  const fmtDate = (d: Date) =>
+    new Date(d).toLocaleDateString('en-NG', { dateStyle: 'long', timeZone: 'Africa/Lagos' });
+
+  const headline = isRenewal ? 'Subscription renewed' : 'Subscription active';
+  const lead = isRenewal
+    ? `Your <strong>${planName}</strong> plan has been extended. Thank you for staying with us!`
+    : `Your <strong>${planName}</strong> plan is now active. Here's everything you've unlocked.`;
+
+  const featureRows = features
+    .map(
+      f => `
+      <div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0">
+        <span style="color:#16a34a;font-size:14px;line-height:1.5">✓</span>
+        <span style="color:#374151;font-size:14px;line-height:1.5">${f}</span>
+      </div>`,
+    )
+    .join('');
+
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+    <title>${headline}</title></head>
+    <body style="margin:0;padding:0;background:#f4f4f5;font-family:Arial,sans-serif">
+      <div style="max-width:560px;margin:40px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)">
+
+        <!-- Header -->
+        <div style="background:linear-gradient(135deg,#1d4ed8 0%,#0f172a 100%);padding:32px 40px;text-align:center">
+          <div style="font-size:36px;margin-bottom:8px">🎉</div>
+          <h1 style="margin:0;color:#fff;font-size:22px">${headline}</h1>
+          <p style="margin:6px 0 0;color:#bfdbfe;font-size:14px">${planName}</p>
+        </div>
+
+        <!-- Body -->
+        <div style="padding:32px 40px">
+
+          <p style="color:#374151;font-size:15px;margin:0 0 4px">Hi <strong>${firstName}</strong>,</p>
+          <p style="color:#374151;font-size:15px;margin:0 0 28px">${lead}</p>
+
+          <!-- Amount highlight -->
+          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:20px 24px;text-align:center;margin-bottom:28px">
+            <p style="margin:0 0 4px;color:#1e40af;font-size:13px;text-transform:uppercase;letter-spacing:.5px;font-weight:700">Amount Paid</p>
+            <p style="margin:0;color:#1d4ed8;font-size:36px;font-weight:800">${fmt(amountPaid)}</p>
+          </div>
+
+          <!-- Billing details -->
+          <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:28px">
+            <div style="padding:0 20px">
+              <div style="display:flex;justify-content:space-between;padding:14px 0;border-bottom:1px solid #f3f4f6">
+                <span style="color:#6b7280;font-size:13px">Plan</span>
+                <span style="color:#111827;font-size:13px;font-weight:700">${planName}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;padding:14px 0;border-bottom:1px solid #f3f4f6">
+                <span style="color:#6b7280;font-size:13px">Billing period</span>
+                <span style="color:#111827;font-size:13px;font-weight:600">${durationDays} days</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;padding:14px 0;border-bottom:1px solid #f3f4f6">
+                <span style="color:#6b7280;font-size:13px">Start date</span>
+                <span style="color:#111827;font-size:13px;font-weight:600">${fmtDate(startDate)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;padding:14px 0;border-bottom:1px solid #f3f4f6">
+                <span style="color:#6b7280;font-size:13px">Active until</span>
+                <span style="color:#111827;font-size:13px;font-weight:700">${fmtDate(endDate)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;padding:14px 0">
+                <span style="color:#6b7280;font-size:13px">Reference</span>
+                <span style="color:#111827;font-size:13px;font-weight:600;font-family:monospace">${paymentReference}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Features -->
+          <p style="color:#111827;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin:0 0 8px">What's included</p>
+          <div style="margin-bottom:24px">${featureRows}</div>
+
+          <!-- Renewal notice -->
+          <div style="background:#fffbeb;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:4px;margin-bottom:24px">
+            <p style="color:#92400e;font-size:13px;margin:0;line-height:1.6">
+              This is a one-time payment for ${durationDays} days — your plan is <strong>not auto-renewed</strong>.
+              We'll remind you before it expires on <strong>${fmtDate(endDate)}</strong> so you can renew and keep your Pro features.
+            </p>
+          </div>
+
+          <div style="text-align:center;margin:8px 0 24px">
+            <a href="${appUrl}" style="display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 40px;border-radius:50px">
+              Go to your dashboard →
+            </a>
+          </div>
+
+          <p style="color:#6b7280;font-size:13px;text-align:center;margin:0;line-height:1.6">
+            You can view or cancel your subscription anytime from Settings. If you cancel,
+            you keep access until ${fmtDate(endDate)}.
+          </p>
+
+        </div>
+
+        <!-- Footer -->
+        <div style="background:#f9fafb;padding:20px 40px;text-align:center;border-top:1px solid #f3f4f6">
+          <p style="color:#9ca3af;font-size:12px;margin:0">
+            This is an automated confirmation. Please keep it for your records.<br/>
+            © ${new Date().getFullYear()} Your Business App. All rights reserved.
+          </p>
+        </div>
+
+      </div>
+    </body>
+    </html>
+  `;
+}
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 class EmailService {
@@ -890,6 +1028,23 @@ class EmailService {
       to,
       subject: `💰 Your wallet was credited with ₦${amount.toLocaleString('en-NG')}`,
       html:    walletFundedTemplate(firstName, amount, newBalance, reference, source, fundedAt),
+    });
+  }
+
+  async sendSubscriptionConfirmation({
+    to, firstName, planName, amountPaid, durationDays,
+    startDate, endDate, paymentReference, isRenewal, features,
+  }: SendSubscriptionConfirmationOptions): Promise<void> {
+    await resend.emails.send({
+      from:    FROM_ADDRESS,
+      to,
+      subject: isRenewal
+        ? `Your ${planName} subscription has been renewed`
+        : `Your ${planName} subscription is active 🎉`,
+      html:    subscriptionConfirmationTemplate(
+        firstName, planName, amountPaid, durationDays,
+        startDate, endDate, paymentReference, isRenewal, features,
+      ),
     });
   }
 

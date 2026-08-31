@@ -40,19 +40,36 @@ class SubscriptionService {
 
   /**
    * Called after Monnify webhook confirms payment for purpose='subscription'
-   * Activates the plan on the user's account
+   * Activates the plan on the user's account. Returns the new endDate and
+   * whether this extended an already-active paid plan (renewal) vs. a fresh
+   * upgrade — the confirmation email wording depends on it.
    */
-  async activatePlan(userId: string, planId: PlanId, transactionReference: string): Promise<void> {
+  async activatePlan(
+    userId: string,
+    planId: PlanId,
+    transactionReference: string,
+  ): Promise<{ endDate: Date; isRenewal: boolean }> {
     const plan = getPlan(planId);
     if (plan.priceKobo === 0) throw new Error('Cannot activate free plan via payment.');
 
-    await this.grantPlan(userId, planId, plan.durationDays);
+    const existing = await User.findById(userId).select('subscription');
+    const isRenewal = !!(
+      existing?.subscription?.status === 'active' &&
+      existing?.subscription?.plan &&
+      existing.subscription.plan !== 'free' &&
+      existing.subscription.endDate &&
+      existing.subscription.endDate > new Date()
+    );
+
+    const endDate = await this.grantPlan(userId, planId, plan.durationDays);
 
     // Mark the transaction as linked to this subscription
     await Transaction.findOneAndUpdate(
       { trans_ref: transactionReference },
       { $set: { metadata: { planId, activatedAt: new Date() } } }
     );
+
+    return { endDate, isRenewal };
   }
 
   /**

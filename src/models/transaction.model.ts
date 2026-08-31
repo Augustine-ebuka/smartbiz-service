@@ -12,8 +12,17 @@ export interface ITransaction extends Document {
     _id: Schema.Types.ObjectId;
     user_id: Schema.Types.ObjectId;
     type: "deposit" | "purchase" | "withdrawal";
-    status: "pending" | "successful" | "failed"; // fixed: "pending" was duplicated, added "failed"
+    // 'partially_paid' — Monnify reported PARTIALLY_PAID (real for bank
+    // transfer, which lets a customer send less than requested). No income/
+    // stock fulfillment happens for this status; it exists purely so the
+    // underpayment is visible instead of the transaction sitting silently
+    // 'pending' forever.
+    status: "pending" | "successful" | "failed" | "partially_paid";
     amount: number;
+    /** Actual amount Monnify reports as received — may differ from `amount` (over/underpayment via bank transfer). Set once a payment event is processed. */
+    amountPaid?: number;
+    /** How `amountPaid` compares to `amount`. Set alongside `amountPaid`. */
+    paymentVariance?: "exact" | "overpaid" | "underpaid";
     trans_ref: string;
     payment_reference: string;
     checkout_url?: string;
@@ -53,8 +62,10 @@ const RedemptionSchema = new Schema<IRedemption>(
 const TransactionSchema: Schema = new Schema({
     user_id: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     type: { type: String, enum: ['deposit', 'purchase'], required: true },
-    status: { type: String, enum: ['pending', 'successful', 'failed'], default: 'pending' },
+    status: { type: String, enum: ['pending', 'successful', 'failed', 'partially_paid'], default: 'pending' },
     amount: { type: Number, required: true },
+    amountPaid: { type: Number, required: false, min: 0 },
+    paymentVariance: { type: String, enum: ['exact', 'overpaid', 'underpaid'], required: false },
     trans_ref: { type: String, required: true, unique: true },
     payment_reference: { type: String, required: false },
     checkout_url: { type: String, required: false },
