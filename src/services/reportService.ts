@@ -1,6 +1,7 @@
 import { Expense } from '../models/expense.model';
 import { Income } from '../models/income.model';
 import { StockHistory,IStockHistory } from '../models/stockHistory.model';
+import { Product } from '../models/product.model';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -88,6 +89,52 @@ export interface ReportsData {
   };
 }
 
+export interface ProductReportData {
+  range: ReportRange;
+
+  product: {
+    id: string;
+    name: string;
+    type: string;
+    price: number;
+    costPrice: number;
+    trackStock: boolean;
+    stock: number;
+  };
+
+  summary: {
+    totalUnitsSold: number;
+    totalRevenue: number;
+    totalCost: number;
+    grossProfit: number;
+    grossMargin: number;
+    transactionCount: number;
+    avgSellingPrice: number;
+    avgUnitsPerTransaction: number;
+  };
+
+  revenueByDay: Array<{ date: string; revenue: number; unitsSold: number; profit: number }>;
+
+  byPaymentMethod: Array<{ method: string; total: number; count: number; percentage: number }>;
+
+  topCustomers: Array<{
+    customerId: string;
+    name: string;
+    totalSpent: number;
+    unitsBought: number;
+    transactionCount: number;
+    lastPurchaseDate: Date;
+  }>;
+
+  growthMetrics: {
+    revenueGrowth: number | null;
+    unitsSoldGrowth: number | null;
+    profitGrowth: number | null;
+  };
+
+  stockMovements: IStockHistory[];
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function utcDate(y: number, m: number, d: number, h = 0, min = 0, s = 0, ms = 0): Date {
@@ -103,7 +150,7 @@ function growthRate(current: number, previous: number): number | null {
   return Math.round(((current - previous) / previous) * 1000) / 10;
 }
 
-function resolveRange(
+export function resolveRange(
   key: DateRangeKey,
   customStart?: string,
   customEnd?: string
@@ -535,6 +582,192 @@ class ReportsService {
         biggestExpenseCategory,
         bestPaymentMethod,
       },
+    };
+  }
+
+  async getProductReport(
+    userId: string,
+    productId: string,
+    rangeKey: DateRangeKey,
+    customStart?: string,
+    customEnd?: string
+  ): Promise<ProductReportData> {
+    const product = await Product.findOne({ _id: productId, userId }).lean();
+    if (!product) {
+      throw new Error('Product not found.');
+    }
+
+    const { start, end, prevStart, prevEnd, label } = resolveRange(rangeKey, customStart, customEnd);
+    const days = daysBetween(start, end);
+
+    const [
+      revenueResult,
+      byPaymentMethodResult,
+      revenueByDayResult,
+      topCustomersResult,
+      prevRevenueResult,
+      stockMovements,
+    ] = await Promise.all([
+
+      // ── Totals for this product in range ───────────────────────────────────
+      Income.aggregate([
+        { $match: { userId, productId: product._id, date: { $gte: start, $lte: end } } },
+        {
+          $group: {
+            _id: null,
+            totalRevenue: { $sum: '$amount' },
+            totalCost:    { $sum: '$costAmount' },
+            unitsSold:    { $sum: '$unit' },
+            count:        { $sum: 1 },
+          },
+        },
+      ]),
+
+      // ── Payment method breakdown for this product ───────────────────────────
+      Income.aggregate([
+        { $match: { userId, productId: product._id, date: { $gte: start, $lte: end } } },
+        { $group: { _id: '$paymentMethod', total: { $sum: '$amount' }, count: { $sum: 1 } } },
+        { $sort: { total: -1 } },
+      ]),
+
+      // ── Revenue/units by day for this product ───────────────────────────────
+      Income.aggregate([
+        { $match: { userId, productId: product._id, date: { $gte: start, $lte: end } } },
+        {
+          $group: {
+            _id:   { $dateToString: { format: '%Y-%m-%d', date: '$date', timezone: 'UTC' } },
+            total: { $sum: '$amount' },
+            cost:  { $sum: '$costAmount' },
+            units: { $sum: '$unit' },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+
+      // ── Top 5 customers of this product ──────────────────────────────────────
+      Income.aggregate([
+        { $match: { userId, productId: product._id, date: { $gte: start, $lte: end }, customerId: { $exists: true, $ne: null } } },
+        {
+          $group: {
+            _id:          '$customerId',
+            totalSpent:   { $sum: '$amount' },
+            unitsBought:  { $sum: '$unit' },
+            txCount:      { $sum: 1 },
+            lastPurchase: { $max: '$date' },
+          },
+        },
+        { $sort: { totalSpent: -1 } },
+        { $limit: 5 },
+        {
+          $lookup: {
+            from: 'customers', localField: '_id',
+            foreignField: '_id', as: 'customer',
+          },
+        },
+        { $unwind: { path: '$customer', preserveNullAndEmptyArrays: true } },
+        {
+          $project: {
+            customerId:       '$_id',
+            name:             { $ifNull: ['$customer.name', 'Unknown Customer'] },
+            totalSpent:       1,
+            unitsBought:      1,
+            transactionCount: '$txCount',
+            lastPurchaseDate: '$lastPurchase',
+          },
+        },
+      ]),
+
+      // ── Previous period totals (for growth) ─────────────────────────────────
+      Income.aggregate([
+        { $match: { userId, productId: product._id, date: { $gte: prevStart, $lte: prevEnd } } },
+        {
+          $group: {
+            _id: null,
+            totalRevenue: { $sum: '$amount' },
+            totalCost:    { $sum: '$costAmount' },
+            unitsSold:    { $sum: '$unit' },
+          },
+        },
+      ]),
+
+      // ── Stock movements for this product in range ───────────────────────────
+      StockHistory.find({ userId, productId: String(product._id), createdAt: { $gte: start, $lte: end } })
+        .sort({ createdAt: -1 })
+        .select('-__v')
+        .lean(),
+    ]);
+
+    const totalRevenue = revenueResult[0]?.totalRevenue ?? 0;
+    const totalCost    = revenueResult[0]?.totalCost    ?? 0;
+    const unitsSold    = revenueResult[0]?.unitsSold    ?? 0;
+    const txCount      = revenueResult[0]?.count         ?? 0;
+    const grossProfit  = totalRevenue - totalCost;
+    const grossMargin  = totalRevenue > 0 ? Math.round((grossProfit / totalRevenue) * 1000) / 10 : 0;
+
+    const prevRevenue  = prevRevenueResult[0]?.totalRevenue ?? 0;
+    const prevCost     = prevRevenueResult[0]?.totalCost    ?? 0;
+    const prevUnits    = prevRevenueResult[0]?.unitsSold    ?? 0;
+    const prevProfit   = prevRevenue - prevCost;
+
+    const byPaymentMethod = byPaymentMethodResult.map((m: any) => ({
+      method:     m._id ?? 'Unknown',
+      total:      m.total,
+      count:      m.count,
+      percentage: totalRevenue > 0 ? Math.round((m.total / totalRevenue) * 1000) / 10 : 0,
+    }));
+
+    const revMap   = new Map(revenueByDayResult.map((r: any) => [r._id, r.total]));
+    const costMap  = new Map(revenueByDayResult.map((r: any) => [r._id, r.cost]));
+    const unitsMap = new Map(revenueByDayResult.map((r: any) => [r._id, r.units]));
+
+    const revenueByDay: Array<{ date: string; revenue: number; unitsSold: number; profit: number }> = [];
+    for (let i = 0; i < days; i++) {
+      const d = new Date(start);
+      d.setUTCDate(d.getUTCDate() + i);
+      const key   = d.toISOString().split('T')[0];
+      const rev   = revMap.get(key)   ?? 0;
+      const cost  = costMap.get(key)  ?? 0;
+      const units = unitsMap.get(key) ?? 0;
+      revenueByDay.push({ date: key, revenue: rev, unitsSold: units, profit: rev - cost });
+    }
+
+    return {
+      range: label,
+
+      product: {
+        id:         String(product._id),
+        name:       product.name,
+        type:       product.type,
+        price:      product.price,
+        costPrice:  product.costPrice ?? 0,
+        trackStock: product.trackStock,
+        stock:      product.stock,
+      },
+
+      summary: {
+        totalUnitsSold: unitsSold,
+        totalRevenue,
+        totalCost,
+        grossProfit,
+        grossMargin,
+        transactionCount: txCount,
+        avgSellingPrice: txCount > 0 ? Math.round((totalRevenue / txCount) * 100) / 100 : 0,
+        avgUnitsPerTransaction: txCount > 0 ? Math.round((unitsSold / txCount) * 100) / 100 : 0,
+      },
+
+      revenueByDay,
+
+      byPaymentMethod,
+
+      topCustomers: topCustomersResult,
+
+      growthMetrics: {
+        revenueGrowth:   growthRate(totalRevenue, prevRevenue),
+        unitsSoldGrowth: growthRate(unitsSold,     prevUnits),
+        profitGrowth:    growthRate(grossProfit,   prevProfit),
+      },
+
+      stockMovements,
     };
   }
 

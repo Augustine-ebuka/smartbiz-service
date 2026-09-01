@@ -13,4 +13,7 @@ const router = Router();
 
 router.get('/', authenticateToken, resolveBusinessOwner, checkSubscription('full_reports'), ReportsController.getReports);
 
+// GET /api/reports/products/:productId?range=this-month
+router.get('/products/:productId', authenticateToken, resolveBusinessOwner, checkSubscription('full_reports'), ReportsController.getProductReport);
+
 export default router;
