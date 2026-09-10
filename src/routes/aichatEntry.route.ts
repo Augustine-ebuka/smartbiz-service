@@ -12,6 +12,7 @@ import InvoiceService from '../services/invoice.service';
 import inventoryService from '../services/inventory.service';
 import { createDebtRecord, markDebtRecordAsPaid } from '../services/debtrecordService';
 import { DebtRecordModel } from '../models/debtrecord';
+import { Invoice } from '../models/invoice.model';
 import subscriptionService from '../services/subscriptionService';
 
 const router = express.Router();
@@ -526,20 +527,39 @@ router.post('/chat/entry', async (req, res) => {
         }
 
         const debts = await DebtRecordModel.find(query).populate('customer', 'name').sort({ createdAt: -1 });
-        const theyOweMe = debts.filter((d: any) => d.type === 'THEY_OWE_ME').reduce((sum: number, d: any) => sum + d.amount, 0);
+        const theyOweMeFromDebts = debts.filter((d: any) => d.type === 'THEY_OWE_ME').reduce((sum: number, d: any) => sum + d.amount, 0);
         const iOweThem = debts.filter((d: any) => d.type === 'I_OWE_THEM').reduce((sum: number, d: any) => sum + d.amount, 0);
 
+        // "They owe me" also includes unpaid/overdue invoices — a separate
+        // ledger from explicit debt records (invoices created via
+        // GENERATE_INVOICE never carry a customerId, only a customerName, so
+        // match on that), but still real money customers owe the business.
+        // Skip this when the user specifically asked what the BUSINESS owes.
+        let unpaidInvoices: any[] = [];
+        if (payload.debtType !== 'I_OWE_THEM') {
+          const invoiceQuery: Record<string, any> = { userId, status: { $in: ['sent', 'overdue'] } };
+          if (customer) invoiceQuery.customerName = { $regex: `^${customer.name}$`, $options: 'i' };
+          unpaidInvoices = await Invoice.find(invoiceQuery).select('invoiceNumber customerName total status dueDate');
+        }
+        const theyOweMeFromInvoices = unpaidInvoices.reduce((sum: number, inv: any) => sum + inv.total, 0);
+        const theyOweMe = theyOweMeFromDebts + theyOweMeFromInvoices;
+
         let reply: string;
-        if (debts.length === 0) {
-          reply = customer ? `No outstanding debts with ${customer.name}.` : 'You have no outstanding debts either way — clean slate!';
+        if (debts.length === 0 && unpaidInvoices.length === 0) {
+          reply = customer ? `No outstanding debts or unpaid invoices with ${customer.name}.` : 'You have no outstanding debts or unpaid invoices — clean slate!';
         } else {
           const parts: string[] = [];
-          if (theyOweMe) parts.push(`people owe you ₦${theyOweMe.toLocaleString()}`);
+          if (theyOweMe) {
+            const breakdown = theyOweMeFromDebts && theyOweMeFromInvoices
+              ? ` (₦${theyOweMeFromDebts.toLocaleString()} in credit sales, ₦${theyOweMeFromInvoices.toLocaleString()} in unpaid invoices)`
+              : '';
+            parts.push(`people owe you ₦${theyOweMe.toLocaleString()}${breakdown}`);
+          }
           if (iOweThem) parts.push(`you owe ₦${iOweThem.toLocaleString()}`);
           reply = (customer ? `${customer.name}: ` : '') + parts.join(', ') + '.';
         }
 
-        res.json({ success: true, actionExecuted: actionType, reply, data: debts, history: [] });
+        res.json({ success: true, actionExecuted: actionType, reply, data: { debts, unpaidInvoices }, history: [] });
         return;
       }
 

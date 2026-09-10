@@ -6,41 +6,78 @@ const ai = new GoogleGenAI({
 });
 
 // --- SCHEMA FOR THE PROACTIVE CFO ALERTS SYSTEM ---
+// Field names are kept stable (healthScore, criticalAlerts, growthOpportunities,
+// executiveSummary, stockHistory) so existing frontends don't break — what
+// changes is the INSTRUCTION for what goes inside them: plain, jargon-free
+// language for a non-expert small business owner, not accountant-speak.
+// moneySnapshot is new and purely additive.
 const cfoAlertSchema: Schema = {
   type: Type.OBJECT,
   properties: {
-    healthScore: { 
-      type: Type.NUMBER, 
-      description: "Overall business financial health score from 1 to 100 based on runway and margins" 
+    healthScore: {
+      type: Type.NUMBER,
+      description: "Overall business financial health score from 1 to 100 — think of it like a credit score, higher means healthier. Based on how long the business's money would last at its current pace and how much profit it keeps."
     },
-    criticalAlerts: { 
-      type: Type.ARRAY, 
-      items: { type: Type.STRING }, 
-      description: "Urgent threats (e.g., critical 46-day runway, high rent dependency)" 
+    overallStatus: {
+      type: Type.STRING,
+      enum: ["Doing Great", "Doing Okay", "Needs Attention", "Critical"],
+      description: "One plain-language verdict matching the health score, for someone glancing at a dashboard for two seconds."
     },
-    growthOpportunities: { 
-      type: Type.ARRAY, 
-      items: { type: Type.STRING }, 
-      description: "Data-backed wins (e.g., pushing high-yield Office Chairs, upselling VIP clients)" 
+    executiveSummary: {
+      type: Type.STRING,
+      description: "A warm, 3-4 sentence plain-language explanation of how the business is doing right now, written for someone with NO finance or accounting background — like explaining it to a friend who runs a shop. Never use jargon (no 'runway', 'margin', 'liquidity', 'COGS', 'burn rate', 'net/gross profit' as bare terms). If a money concept must come up, say it in an everyday sentence instead, e.g. 'For every ₦100 you sold, you kept about ₦15 as profit' rather than 'gross margin of 15%'. Always use real ₦ figures phrased the way a person actually talks."
     },
-    executiveSummary: { 
-      type: Type.STRING, 
-      description: "A concise 3-sentence summary of the business's current financial standing." 
+    moneySnapshot: {
+      type: Type.OBJECT,
+      description: "A simple, plain-sentence breakdown of money in vs money out vs money owed — the four or five numbers a novice owner actually cares about, each spelled out in words, not labels.",
+      properties: {
+        madeThisPeriod:  { type: Type.STRING, description: "e.g. 'You brought in ₦450,000 from sales this period.'" },
+        spentThisPeriod: { type: Type.STRING, description: "e.g. 'You spent ₦380,000 on stock and other expenses.'" },
+        keptAsProfit:    { type: Type.STRING, description: "e.g. 'That left you with about ₦70,000 in your pocket as profit.' If the business lost money, say so plainly, e.g. 'You spent more than you made this period, by about ₦20,000.'" },
+        theyOweYou:      { type: Type.STRING, description: "From receivablesAndPayables.totalTheyOweMe (this already combines debts owed AND unpaid invoices — always use this combined total, never just one of its sub-lists), e.g. 'Customers still owe you ₦100,000 in total — ₦25,000 from credit sales and ₦75,000 from an unpaid invoice.' or, if zero, 'No one currently owes you money — nice and clean.'" },
+        youOweOthers:    { type: Type.STRING, description: "From receivablesAndPayables.totalIOweThem, e.g. 'You currently owe suppliers or others ₦10,000.' or, if zero, 'You don't owe anyone money right now.'" }
+      },
+      required: ["madeThisPeriod", "spentThisPeriod", "keptAsProfit", "theyOweYou", "youOweOthers"]
     },
-    stockHistory: { 
-      type: Type.ARRAY, 
-      items: { type: Type.OBJECT }, 
-      description: "Detailed stock history or inventory data for the business, including date, quantity,product name, and price." 
+    criticalAlerts: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: "Urgent issues the owner needs to know about right now. Each is ONE short, plain sentence with no financial jargon, explained the way you'd warn a friend, ending with one clear, doable next step. E.g. instead of 'critical 46-day runway', say 'At how fast you're spending compared to what's coming in, your money could run out in about 46 days if nothing changes — try cutting a non-essential cost or collecting what customers owe you.' Empty array if nothing is urgent — do not invent a problem just to fill this."
+    },
+    growthOpportunities: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: "Encouraging, data-backed ideas for making more money. Each is ONE short plain sentence ending with a concrete next step, e.g. 'Office Chairs are your best seller and earn you good profit on each one — consider stocking more or pointing customers toward them.' Empty array if there's nothing notable — do not invent one."
+    },
+    stockHistory: {
+      type: Type.ARRAY,
+      items: { type: Type.OBJECT },
+      description: "Recent stock movements. Include the underlying date, product name, quantity, and price fields as given, plus one short plain-language 'note' per entry a novice can read at a glance, e.g. 'Restocked 20 units of Rice on July 3rd.'"
     }
   },
-  required: ["healthScore", "criticalAlerts", "growthOpportunities", "executiveSummary", "stockHistory"]
+  required: ["healthScore", "overallStatus", "criticalAlerts", "growthOpportunities", "executiveSummary", "moneySnapshot", "stockHistory"]
 };
 
 // --- SYSTEM INSTRUCTIONS ---
-const SYSTEM_CORE_CONTEXT = `You are a world-class Virtual CFO and automated business data analyst. 
-You are given a highly detailed JSON report containing Profit & Loss, Cash Flow, Expense reports, Revenue insights, Top Products, Top Customers, and Growth Metrics.
-Your job is to analyze this data deeply, find hidden correlations (e.g., comparing product transaction frequency to revenue yield, or tracking runway drops), and provide strategic advice. 
-Include stock history data in your analysis.`
+
+// Shared "explain it like I'm not an accountant" style guide — most users of
+// this app are everyday traders and shop owners, not finance people, so every
+// AI-generated response (CFO report AND the chat widget) has to read that way.
+const PLAIN_LANGUAGE_STYLE = `
+You are writing for a small business owner with NO financial or accounting background — a shop owner, trader, or service provider, not an accountant. Follow these rules strictly:
+- Never use financial jargon (examples to avoid entirely: "runway", "margin", "gross/net profit" as bare labels, "liquidity", "COGS", "burn rate", "ROI", "P&L"). If the underlying idea matters, explain it in one everyday sentence at the moment you use it — e.g. say "for every ₦100 you sold, you kept about ₦15 as profit" instead of "15% gross margin".
+- Use short, simple sentences. No long, multi-clause explanations or business-school phrasing.
+- Always phrase numbers the way a person actually talks, with the ₦ sign, e.g. "You made ₦450,000 this month" — never present a raw field name or number without a sentence around it.
+- Be warm, encouraging, and constructive even when the news is bad — sound like a supportive friend giving practical advice, not an auditor reading out a verdict.
+- Every warning or suggestion should end with one concrete, doable next step a busy shop owner could actually act on today.`;
+
+const SYSTEM_CORE_CONTEXT = `You are a friendly financial helper for small business owners, analyzing their real business data on their behalf.
+You are given a highly detailed JSON report containing Profit & Loss, Cash Flow, Expense reports, Revenue insights, Top Products, Top Customers, Growth Metrics, Stock History, and Receivables & Payables (see "receivablesAndPayables": totalTheyOweMe is the TOTAL customers owe the business — it already combines both explicit debt records ("outstandingDebts") AND unpaid/overdue invoices ("unpaidInvoices"), so always quote totalTheyOweMe itself rather than just one of the two lists underneath it; totalIOweThem is what the business owes others, from outstandingDebts only).
+Your job is to analyze this data deeply, find hidden correlations (e.g., comparing product transaction frequency to revenue yield, or tracking sudden drops in cash), and turn it into practical advice.
+Include stock history data in your analysis.
+${PLAIN_LANGUAGE_STYLE}
+
+CRITICAL — never guess or state a number/fact that is not actually present in the JSON payload. If the user asks about something the payload has no field for (or the relevant array/field is missing entirely, as opposed to genuinely present-but-empty), say plainly that you don't have that data in the current report, and suggest what they could check instead — do NOT default to "none"/"zero"/"no outstanding" as if that were a real answer. Only report a zero/empty result when the relevant field IS present in the payload and is actually empty (e.g. "outstandingDebts": [] really does mean no debts).`
 ;
 
 
@@ -56,7 +93,7 @@ export async function generateCfoAlerts(dashboardData: any) {
         { text: `Analyze this current financial payload: ${JSON.stringify(dashboardData)}` }
       ],
       config: {
-        systemInstruction: `${SYSTEM_CORE_CONTEXT} Evaluate the data and output a structured diagnostic overview.`,
+        systemInstruction: `${SYSTEM_CORE_CONTEXT} Evaluate the data and output a structured diagnostic overview a novice small business owner can read in under a minute and immediately understand and act on.`,
         responseMimeType: 'application/json',
         responseSchema: cfoAlertSchema
       }
@@ -86,7 +123,7 @@ export async function askBusinessChat(dashboardData: any, userQuestion: string, 
         { text: `User Question: ${userQuestion}` }
       ],
       config: {
-        systemInstruction: `${SYSTEM_CORE_CONTEXT} Answer the user's question directly, clearly, and concisely using the exact metrics from the dataset. Use clear professional formatting.`,
+        systemInstruction: `${SYSTEM_CORE_CONTEXT} Answer the user's question directly and briefly using the exact metrics from the dataset, in the same plain, jargon-free style — a couple of short sentences, not a report.`,
         // Text mode allows the AI to write conversational, human replies
         responseMimeType: 'text/plain' 
       }

@@ -2,6 +2,8 @@ import { Expense } from '../models/expense.model';
 import { Income } from '../models/income.model';
 import { StockHistory,IStockHistory } from '../models/stockHistory.model';
 import { Product } from '../models/product.model';
+import { DebtRecordModel } from '../models/debtrecord';
+import { Invoice } from '../models/invoice.model';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -80,6 +82,36 @@ export interface ReportsData {
   };
 
   stockHistory: IStockHistory[];
+
+  // Outstanding debts — a running balance, not scoped to the report's date
+  // range (an unpaid debt from last month is still owed today).
+  //
+  // "What customers owe the business" has TWO independent sources that must
+  // both be counted: explicit DebtRecord entries (e.g. logged via chat as
+  // "sold on credit") AND unpaid/overdue Invoices (generated via
+  // GENERATE_INVOICE, owed until their status flips to 'paid'). Missing
+  // either one understates totalTheyOweMe.
+  receivablesAndPayables: {
+    totalTheyOweMe: number;          // sum of PENDING debts + sum of unpaid/overdue invoices
+    totalIOweThem: number;           // sum of PENDING debts where the business owes someone else
+    outstandingDebts: Array<{
+      debtId: string;
+      customerName: string;
+      type: 'THEY_OWE_ME' | 'I_OWE_THEM';
+      amount: number;
+      dueDate?: Date;
+      description?: string;
+      createdAt: Date;
+    }>;
+    unpaidInvoices: Array<{
+      invoiceId: string;
+      invoiceNumber: string;
+      customerName: string;
+      amount: number;
+      status: 'sent' | 'overdue';
+      dueDate: Date;
+    }>;
+  };
 
   summary: {
     periodDays: number;
@@ -254,6 +286,9 @@ class ReportsService {
       transactionCount,
 
       stockHistory,
+
+      outstandingDebtsResult,
+      unpaidInvoicesResult,
     ] = await Promise.all([
 
       // ── Current period revenue + cost of goods sold ────────────────────────
@@ -424,6 +459,18 @@ class ReportsService {
         .populate('productId')
         .select('-__v -createdAt -updatedAt')
         .lean(),
+
+      // ── Outstanding debts (all-time balance, not range-scoped) ─────────────
+      DebtRecordModel.find({ userId, status: 'PENDING' })
+        .populate('customer', 'name')
+        .sort({ createdAt: -1 })
+        .lean(),
+
+      // ── Unpaid invoices (also all-time — same reasoning as debts above) ────
+      Invoice.find({ userId, status: { $in: ['sent', 'overdue'] } })
+        .select('invoiceNumber customerName total status dueDate')
+        .sort({ dueDate: 1 })
+        .lean(),
           ]);
 
     // ── Compute base values ───────────────────────────────────────────────────
@@ -522,6 +569,41 @@ class ReportsService {
       ? incomeByPaymentMethod[0]._id ?? 'Unknown'
       : 'None';
 
+    // ── Outstanding debts ──────────────────────────────────────────────────────
+
+    const outstandingDebts = outstandingDebtsResult.map((d: any) => ({
+      debtId:      String(d._id),
+      customerName: d.customer?.name ?? 'Unknown Customer',
+      type:        d.type,
+      amount:      d.amount,
+      dueDate:     d.dueDate,
+      description: d.description,
+      createdAt:   d.createdAt,
+    }));
+
+    const totalDebtsTheyOweMe = outstandingDebts
+      .filter(d => d.type === 'THEY_OWE_ME')
+      .reduce((sum, d) => sum + d.amount, 0);
+
+    const totalIOweThem = outstandingDebts
+      .filter(d => d.type === 'I_OWE_THEM')
+      .reduce((sum, d) => sum + d.amount, 0);
+
+    const unpaidInvoices = unpaidInvoicesResult.map((inv: any) => ({
+      invoiceId:     String(inv._id),
+      invoiceNumber: inv.invoiceNumber,
+      customerName:  inv.customerName,
+      amount:        inv.total,
+      status:        inv.status,
+      dueDate:       inv.dueDate,
+    }));
+
+    const totalUnpaidInvoices = unpaidInvoices.reduce((sum, inv) => sum + inv.amount, 0);
+
+    // What customers owe the business = explicit debt records + unpaid invoices.
+    // These are two independent ledgers — a customer could owe via either or both.
+    const totalTheyOweMe = totalDebtsTheyOweMe + totalUnpaidInvoices;
+
 
 
     return {
@@ -574,7 +656,14 @@ class ReportsService {
         transactionGrowth: growthRate(transactionCount, prevTxCount),
       },
 
-      stockHistory, 
+      stockHistory,
+
+      receivablesAndPayables: {
+        totalTheyOweMe,
+        totalIOweThem,
+        outstandingDebts,
+        unpaidInvoices,
+      },
 
       summary: {
         periodDays:             days,
