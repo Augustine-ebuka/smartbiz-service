@@ -14,6 +14,7 @@ export interface IProduct extends Document {
   price: number;
   costPrice?: number;              // what this item costs the business, per unit — for profit tracking
   description?: string;
+  category?: string;
   imageUrl?: string;
   isPublic: boolean;
   barcode?: string;                // optional barcode for physical goods
@@ -36,6 +37,7 @@ const ProductSchema = new Schema<IProduct>(
     price:       { type: Number, required: true, min: 0 },
     costPrice:   { type: Number, min: 0 },
     description: { type: String, trim: true },
+    category:    { type: String, trim: true },
     imageUrl:      { type: String, trim: true },
     isPublic:      { type: Boolean, default: false },
     barcode:       { type: String, unique: true, sparse: true },  // optional unique barcode

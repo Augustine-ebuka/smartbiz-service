@@ -13,6 +13,7 @@ import route from './routes/index';
 import { APP_NAME, APP_PREFIX_PATH, IS_TEST, APP_PORT, APP_FRONTEND, IS_PRODUCTION, MONGODB_URI } from './config/config'
 import ApiError from './utils/ApiError';
 import { initCronJobs } from './utils/cronjobs';
+import productCategoryService from './services/productCategoryService';
 const app = express();
 const PORT = process.env.PORT || APP_PORT;
 
@@ -201,6 +202,9 @@ async function startServer() {
     await dropLegacyGlobalInvoiceNumberIndex();
     await dropLegacyGlobalReceiptIdIndex();
     await dropLegacyReceiptIdUniqueIndex();
+
+    // Idempotent — upserts, so this is a no-op after the first successful run.
+    await productCategoryService.seedSystemCategories();
 
     console.log('Connected to MongoDB successfully');
 

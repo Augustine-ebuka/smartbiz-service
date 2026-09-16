@@ -4,6 +4,7 @@ import { authenticateToken } from '../middlewares/authMiddleware';
 import CustomerController from '../controllers/customerController';
 import ProductController from '../controllers/productController';
 import ExpenseCategoryController from '../controllers/expenseCategoryController';
+import ProductCategoryController from '../controllers/productCategoryController';
 import {resolveBusinessOwner} from '../middlewares/businessOwnerMiddleware';
 import { checkSubscription } from '../middlewares/subscriptionMiddleware';
 const router = Router();
@@ -56,5 +57,18 @@ router.get   ('/expense-categories',     ExpenseCategoryController.getAll);
 router.get   ('/expense-categories/:id', ExpenseCategoryController.getById);
 router.patch ('/expense-categories/:id', ExpenseCategoryController.update);
 router.delete('/expense-categories/:id', ExpenseCategoryController.delete);
+
+// ─── Product Categories ────────────────────────────────────────────────────────
+// POST   /api/catalog/product-categories         → create category
+// GET    /api/catalog/product-categories         → list all categories (built-in + own)
+// GET    /api/catalog/product-categories/:id     → get single category
+// PATCH  /api/catalog/product-categories/:id     → update category (own only)
+// DELETE /api/catalog/product-categories/:id     → delete category (own only)
+
+router.post  ('/product-categories',     ProductCategoryController.create);
+router.get   ('/product-categories',     ProductCategoryController.getAll);
+router.get   ('/product-categories/:id', ProductCategoryController.getById);
+router.patch ('/product-categories/:id', ProductCategoryController.update);
+router.delete('/product-categories/:id', ProductCategoryController.delete);
 
 export default router;

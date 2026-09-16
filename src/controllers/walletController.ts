@@ -607,6 +607,104 @@ export const unredeemTransactionHandler = async (
 };
 
 /**
+ * POST /transactions/:reference/cancel
+ *
+ * Cancels a storefront order that hasn't been paid yet. `:reference`
+ * matches either transactionReference (trans_ref) or paymentReference
+ * (payment_reference). Only 'pending' orders can be cancelled this way —
+ * a 'successful' (paid) or 'partially_paid' order already has real money
+ * attached and needs a refund flow instead, not a silent status flip.
+ *
+ * Idempotency/race-safety mirrors redeemTransactionHandler: the update is
+ * atomic and guarded on `status: 'pending'`, so a payment landing via
+ * webhook at the same moment can't be clobbered by a stale cancel request.
+ */
+export const cancelTransactionHandler = async (
+  req: any,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const { reference } = req.params;
+    const { reason } = req.body ?? {};
+    const ownerId = req.businessOwnerId as string;
+    const cancelledById = req.userId as string;
+
+    const transaction = await Transaction.findOne({
+      $or: [{ trans_ref: reference }, { payment_reference: reference }],
+    });
+
+    if (!transaction) {
+      next(new ApiError(404, 'Transaction not found.'));
+      return;
+    }
+
+    if (transaction.user_id.toString() !== ownerId) {
+      next(new ApiError(403, 'You do not have permission to cancel this order.'));
+      return;
+    }
+
+    if (transaction.status !== 'pending') {
+      res.status(409).json({
+        success: false,
+        message: `This order is already '${transaction.status}' and can no longer be cancelled.`,
+        code: 409,
+        data: { status: transaction.status },
+      });
+      return;
+    }
+
+    const canceller = await User.findById(cancelledById).select('firstName lastName');
+    const cancelledByName = canceller ? `${canceller.firstName} ${canceller.lastName}`.trim() : 'Unknown';
+    const cancelledAt = new Date();
+
+    // Atomic — only succeeds while still 'pending', closing the race window
+    // between the check above and this write (e.g. a webhook confirming
+    // payment at the same moment).
+    const updated = await Transaction.findOneAndUpdate(
+      { _id: transaction._id, status: 'pending' },
+      {
+        $set: {
+          status: 'cancelled',
+          cancellation: {
+            cancelledBy: cancelledById,
+            cancelledByName,
+            cancelledAt,
+            reason: reason ?? null,
+          },
+        },
+      },
+      { new: true },
+    );
+
+    if (!updated) {
+      const latest = await Transaction.findById(transaction._id);
+      res.status(409).json({
+        success: false,
+        message: `This order is already '${latest?.status}' and can no longer be cancelled.`,
+        code: 409,
+        data: { status: latest?.status },
+      });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Order cancelled.',
+      data: {
+        reference,
+        transactionReference: updated.trans_ref,
+        paymentReference: updated.payment_reference,
+        status: updated.status,
+        cancellation: updated.cancellation,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * POST /sub-accounts
  * Body: { accountNumber, bankCode, email }
  *

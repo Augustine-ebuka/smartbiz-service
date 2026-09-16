@@ -21,6 +21,7 @@ async function getActorInfo(userId: string): Promise<{ actorName: string; actorR
 
 export interface CreateIncomeDTO {
   productId?: string;
+  productName?: string;   // only used when productId is absent — ignored otherwise
   unit?: number;
   amount: number;
   costAmount?: number;
@@ -102,6 +103,10 @@ class IncomeService {
       unit,
       costAmount,
       vatAmount,
+      // Only ever stored when there's no productId — with a real product
+      // linked, its name is the source of truth (via populate), so a
+      // free-text name here would just be redundant/stale.
+      productName:   payload.productId ? undefined : (payload.productName?.trim() || undefined),
       paymentMethod: payload.paymentMethod ?? 'Cash',
       date:          payload.date ? new Date(payload.date) : new Date(),
     });
@@ -216,6 +221,16 @@ class IncomeService {
     // immutable once assigned.
     const { returned: _ignoredReturned, receiptId: _ignoredReceiptId, ...safePayload } = payload as UpdateIncomeDTO & { returned?: boolean; receiptId?: string };
 
+    // productName only makes sense without a productId (see create()) — if
+    // this update attaches a productId, drop it from $set and $unset it
+    // instead, so a stale free-text name can't linger once a real product is
+    // linked. Otherwise, trim it like any other string field.
+    if (payload.productId) {
+      delete (safePayload as any).productName;
+    } else if (payload.productName !== undefined) {
+      (safePayload as any).productName = payload.productName.trim() || undefined;
+    }
+
     const income = await Income.findOneAndUpdate(
       { _id: incomeId, userId },
       {
@@ -223,6 +238,7 @@ class IncomeService {
           ...safePayload,
           ...(payload.date && { date: new Date(payload.date as string) }),
         },
+        ...(payload.productId && { $unset: { productName: 1 } }),
       },
       { new: true, runValidators: true }
     )

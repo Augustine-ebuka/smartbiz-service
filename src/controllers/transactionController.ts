@@ -59,7 +59,7 @@ class TransactionController {
             const result = await TransactionService.getAll({
                 page: page ? parseInt(page as string) : undefined,
                 limit: limit ? parseInt(limit as string) : undefined,
-                status: status as "pending" | "successful" | "failed" | undefined,
+                status: status as "pending" | "successful" | "failed" | "partially_paid" | "cancelled" | undefined,
                 type: type as "deposit" | "purchase" | undefined,
                 user_id: user_id as string | undefined,
             });
@@ -84,7 +84,7 @@ class TransactionController {
                 user_id: user_id.toString(),
                 page: page ? parseInt(page as string) : undefined,
                 limit: limit ? parseInt(limit as string) : undefined,
-                status: status as "pending" | "successful" | "failed" | undefined,
+                status: status as "pending" | "successful" | "failed" | "partially_paid" | "cancelled" | undefined,
                 type: type as "deposit" | "purchase" | undefined,
             });
 

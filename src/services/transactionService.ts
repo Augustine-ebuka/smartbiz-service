@@ -6,7 +6,7 @@ import {Transaction, ITransaction} from '../models/transaction.model';
 interface GetAllTransactionsOptions {
     page?: number;
     limit?: number;
-    status?: "pending" | "successful" | "failed";
+    status?: "pending" | "successful" | "failed" | "partially_paid" | "cancelled";
     type?: "deposit" | "purchase";
     user_id?: string;
 }

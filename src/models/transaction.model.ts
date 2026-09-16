@@ -8,6 +8,14 @@ export interface IRedemption {
     note?: string | null;
 }
 
+export interface ICancellation {
+    cancelledBy: Schema.Types.ObjectId;
+    /** Snapshot of the staff member's name at cancellation time — doesn't retroactively change if they rename their account later. */
+    cancelledByName: string;
+    cancelledAt: Date;
+    reason?: string | null;
+}
+
 export interface ITransaction extends Document {
     _id: Schema.Types.ObjectId;
     user_id: Schema.Types.ObjectId;
@@ -17,7 +25,7 @@ export interface ITransaction extends Document {
     // stock fulfillment happens for this status; it exists purely so the
     // underpayment is visible instead of the transaction sitting silently
     // 'pending' forever.
-    status: "pending" | "successful" | "failed" | "partially_paid";
+    status: "pending" | "successful" | "failed" | "partially_paid" | "cancelled";
     amount: number;
     /** Actual amount Monnify reports as received — may differ from `amount` (over/underpayment via bank transfer). Set once a payment event is processed. */
     amountPaid?: number;
@@ -46,6 +54,8 @@ export interface ITransaction extends Document {
     metadata?: Record<string, any>;
     /** Set once a business marks this payment as physically redeemed/picked up. Absent (not null) until then, so a $exists check can atomically guard against double redemption. */
     redemption?: IRedemption;
+    /** Set once a business cancels this order. Only ever set while `status` was still 'pending' — a paid order is never cancelled through this flow. */
+    cancellation?: ICancellation;
 
 }
 
@@ -59,10 +69,20 @@ const RedemptionSchema = new Schema<IRedemption>(
     { _id: false }
 );
 
+const CancellationSchema = new Schema<ICancellation>(
+    {
+        cancelledBy:     { type: Schema.Types.ObjectId, ref: 'User', required: true },
+        cancelledByName: { type: String, required: true, trim: true },
+        cancelledAt:     { type: Date, required: true },
+        reason:          { type: String, trim: true, default: null },
+    },
+    { _id: false }
+);
+
 const TransactionSchema: Schema = new Schema({
     user_id: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     type: { type: String, enum: ['deposit', 'purchase'], required: true },
-    status: { type: String, enum: ['pending', 'successful', 'failed', 'partially_paid'], default: 'pending' },
+    status: { type: String, enum: ['pending', 'successful', 'failed', 'partially_paid', 'cancelled'], default: 'pending' },
     amount: { type: Number, required: true },
     amountPaid: { type: Number, required: false, min: 0 },
     paymentVariance: { type: String, enum: ['exact', 'overpaid', 'underpaid'], required: false },
@@ -86,6 +106,7 @@ const TransactionSchema: Schema = new Schema({
     // No `default` — stays absent (not null) until redeemed, so the atomic
     // redeem write can use { redemption: { $exists: false } } as its guard.
     redemption: { type: RedemptionSchema },
+    cancellation: { type: CancellationSchema },
 
 }, {
     timestamps: true

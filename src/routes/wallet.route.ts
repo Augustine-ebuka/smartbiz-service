@@ -14,6 +14,7 @@ import {
   redeemTransactionHandler,
   getRedemptionHandler,
   unredeemTransactionHandler,
+  cancelTransactionHandler,
 } from '../controllers/walletController';
 import { authenticateToken } from '../middlewares/authMiddleware';
 import { resolveBusinessOwner, requireOwner } from '../middlewares/businessOwnerMiddleware';
@@ -68,6 +69,15 @@ router.delete(
   resolveBusinessOwner,
   requireOwner,
   unredeemTransactionHandler,
+);
+
+// Authenticated — cancel a still-pending storefront order. Owner or invited
+// saleskeeper of the transaction's business only.
+router.post(
+  '/transactions/:reference/cancel',
+  authenticateToken,
+  resolveBusinessOwner,
+  cancelTransactionHandler,
 );
 
 // POST /sub-accounts

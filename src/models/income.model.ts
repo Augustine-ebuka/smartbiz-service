@@ -12,6 +12,7 @@ export interface IIncome extends Document {
   groupRef?: string;                      // client-supplied tag shared by records saved in the same bulk/group submission
   userId: string;
   productId?: mongoose.Types.ObjectId;    // ref → Product (optional, can be custom amount)
+  productName?: string;                   // free-text product/service label — only used when productId is absent
   unit: number;                           // quantity
   amount: number;                         // total amount received
   costAmount: number;                     // cost of goods sold, for profit = amount - costAmount
@@ -37,6 +38,7 @@ const IncomeSchema = new Schema<IIncome>(
     groupRef:      { type: String, index: true },
     userId:        { type: String, required: true, index: true },
     productId:     { type: Schema.Types.ObjectId, ref: 'Product' },
+    productName:   { type: String, trim: true },
     unit:          { type: Number, required: true, min: 1, default: 1 },
     amount:        { type: Number, required: true, min: 0 },
     costAmount:    { type: Number, default: 0, min: 0 },
