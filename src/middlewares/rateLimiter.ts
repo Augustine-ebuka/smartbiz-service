@@ -14,3 +14,16 @@ export const authLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many attempts. Please try again in 15 minutes.' },
 });
+
+/**
+ * Throttles the public investor-report share view per IP. The token itself
+ * is 256 bits of entropy (unguessable), but this still caps how fast a
+ * scraper can hammer the endpoint once a link leaks.
+ */
+export const publicShareLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please try again later.' },
+});

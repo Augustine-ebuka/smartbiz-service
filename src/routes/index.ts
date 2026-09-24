@@ -29,6 +29,7 @@ import vendorRoute from './vendor.routes';
 import payrollRoutes from './payroll.routes';
 import taxRoutes from './tax.routes';
 import notificationRoutes from './notification.routes';
+import investorReportShareRoute from './investorReportShare.route';
 
 router.use("/v1/tax", taxRoutes);
 
@@ -60,6 +61,8 @@ router.use("/v1/invoices", invoiceRoutes);
 router.use("/v1/vendors", vendorRoute);
 router.use("/v1/payroll", payrollRoutes);
 router.use("/v1/notifications", notificationRoutes);
+// Public — recipient view of a shared, expiring investor report link
+router.use("/v1/investor-reports", investorReportShareRoute);
 
 router.get("/v1", (req, res) => {
   res.send("Welcome smart biz to Version 1 API");

@@ -43,7 +43,9 @@ export type ActivityAction =
   | 'subscription.manual_revoke'
   | 'subscription.manual_edit'
   | 'wallet.manual_credit'
-  | 'tax.update_settings';
+  | 'tax.update_settings'
+  | 'report.share_created'
+  | 'report.share_revoked';
 
 // ─── Interface ────────────────────────────────────────────────────────────────
 

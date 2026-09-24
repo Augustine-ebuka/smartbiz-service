@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middlewares/authMiddleware';
 import ReportsController from '../controllers/reportController';
+import InvestorReportShareController from '../controllers/investorReportShareController';
 import { authorizationMiddleware } from '../middlewares/authorizationMiddleware';
-import {resolveBusinessOwner} from '../middlewares/businessOwnerMiddleware';
+import {resolveBusinessOwner, requireOwner} from '../middlewares/businessOwnerMiddleware';
 import { checkSubscription } from '../middlewares/subscriptionMiddleware';
 const router = Router();
 
@@ -15,5 +16,16 @@ router.get('/', authenticateToken, resolveBusinessOwner, checkSubscription('full
 
 // GET /api/reports/products/:productId?range=this-month
 router.get('/products/:productId', authenticateToken, resolveBusinessOwner, checkSubscription('full_reports'), ReportsController.getProductReport);
+
+// Investor report sharing — owner-only. Generates a read-only link (expires in 2 days)
+// to the current report snapshot, e.g. to send to a prospective investor.
+// POST /api/reports/share  { range, startDate?, endDate?, recipientName?, recipientEmail? }
+router.post('/share', authenticateToken, resolveBusinessOwner, requireOwner, checkSubscription('full_reports'), InvestorReportShareController.create);
+
+// GET /api/reports/share — list links this owner has generated
+router.get('/share', authenticateToken, resolveBusinessOwner, requireOwner, InvestorReportShareController.list);
+
+// DELETE /api/reports/share/:id — revoke a link before it naturally expires
+router.delete('/share/:id', authenticateToken, resolveBusinessOwner, requireOwner, InvestorReportShareController.revoke);
 
 export default router;

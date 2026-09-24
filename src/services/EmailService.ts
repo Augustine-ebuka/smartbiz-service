@@ -81,6 +81,15 @@ interface SendInvoiceOptions {
   pdfBuffer?: Buffer;   // when present, attached to the email as a downloadable PDF
 }
 
+interface SendInvestorReportShareOptions {
+  to: string;                      // investor/recipient email
+  recipientName: string;
+  ownerName: string;
+  businessName: string;
+  shareUrl: string;
+  expiresAt: Date;
+}
+
 interface SendWalletFundedOptions {
   to: string;
   firstName: string;
@@ -340,6 +349,68 @@ function saleskeeperInviteTemplate(name: string, businessName: string, email: st
       <div class="footer"><p>© ${new Date().getFullYear()} Your Business App. All rights reserved.</p></div>
     </div>
     </body></html>
+  `;
+}
+
+// ─── Investor Report Share Template (to recipient) ────────────────────────────
+
+function investorReportShareTemplate(
+  recipientName: string,
+  ownerName: string,
+  businessName: string,
+  shareUrl: string,
+  expiresAt: Date,
+): string {
+  const expiryStr = new Date(expiresAt).toLocaleString('en-NG', {
+    dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Lagos',
+  });
+
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+    <title>Business report shared with you</title></head>
+    <body style="margin:0;padding:0;background:#f4f4f5;font-family:Arial,sans-serif">
+      <div style="max-width:560px;margin:40px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)">
+
+        <div style="background:linear-gradient(135deg,#1d4ed8 0%,#0f172a 100%);padding:32px 40px;text-align:center">
+          <div style="font-size:36px;margin-bottom:8px">📊</div>
+          <h1 style="margin:0;color:#fff;font-size:22px">A business report has been shared with you</h1>
+          <p style="margin:6px 0 0;color:#bfdbfe;font-size:14px">${businessName}</p>
+        </div>
+
+        <div style="padding:32px 40px">
+          <p style="color:#374151;font-size:15px;margin:0 0 16px">Hi <strong>${recipientName}</strong>,</p>
+          <p style="color:#374151;font-size:15px;line-height:1.6;margin:0 0 28px">
+            <strong>${ownerName}</strong> has shared a read-only snapshot of <strong>${businessName}</strong>'s
+            business report with you.
+          </p>
+
+          <div style="text-align:center;margin:8px 0 24px">
+            <a href="${shareUrl}" style="display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 40px;border-radius:50px">
+              View Report →
+            </a>
+          </div>
+
+          <div style="background:#fffbeb;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:4px">
+            <p style="color:#92400e;font-size:13px;margin:0;line-height:1.6">
+              ⏳ This link expires on <strong>${expiryStr}</strong> and can be revoked by the business owner at any time.
+            </p>
+          </div>
+
+          <p style="color:#6b7280;font-size:13px;text-align:center;margin:24px 0 0">
+            If the button above does not work, copy and paste this link into your browser:<br/>
+            <span style="color:#1d4ed8;word-break:break-all">${shareUrl}</span>
+          </p>
+        </div>
+
+        <div style="background:#f9fafb;padding:20px 40px;text-align:center;border-top:1px solid #f3f4f6">
+          <p style="color:#9ca3af;font-size:12px;margin:0">© ${new Date().getFullYear()} Your Business App. All rights reserved.</p>
+        </div>
+
+      </div>
+    </body>
+    </html>
   `;
 }
 
@@ -947,6 +1018,17 @@ class EmailService {
       to,
       subject: `You have been invited to manage ${businessName}`,
       html:    saleskeeperInviteTemplate(name, businessName, to, tempPassword),
+    });
+  }
+
+  async sendInvestorReportShare({
+    to, recipientName, ownerName, businessName, shareUrl, expiresAt,
+  }: SendInvestorReportShareOptions): Promise<void> {
+    await resend.emails.send({
+      from:    FROM_ADDRESS,
+      to,
+      subject: `${ownerName} shared a business report from ${businessName} with you`,
+      html:    investorReportShareTemplate(recipientName, ownerName, businessName, shareUrl, expiresAt),
     });
   }
 
